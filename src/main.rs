@@ -1,12 +1,13 @@
 //! Sysglow (kurz: glow) – schlankes Desktop-Widget im Hacker-Stil:
-//! Kopfzeile, CPU, RAM, Platten, Netz und Ping-Zeilen. Jedes Element einzeln an/aus.
+//! Kopfzeile, Uhr, CPU, RAM, Platten, Netz, Energieplan und Ping-Zeilen. Jedes Element einzeln an/aus.
+//! Schaltet beim Start eines Spiels auf Hoechstleistung und danach zurueck auf Ausbalanciert.
 //! Konfiguration: sysglow.ini neben der exe (wird bei Aenderung automatisch neu geladen).
 //!
 //! Liegt nur auf dem Desktop (unter allen Fenstern) und blendet sich bei Vollbild/Spielen aus.
 //! Maus: ziehen = verschieben, Hover = Details, Klick auf Ping = Graph an/aus,
 //! Doppelklick = Befehl / Task-Manager / Laufwerk oeffnen, Rechtsklick oder Tray-Icon = Menue.
 //!
-//! Aufbau: config.rs (ini), stats.rs (Systemwerte), ping.rs (ICMP), gfx.rs (Zeichnen),
+//! Aufbau: config.rs (ini), stats.rs (Systemwerte), ping.rs (ICMP), power.rs (Energieplan, Spiele), gfx.rs (Zeichnen),
 //! app.rs (Zustand + Elemente), main.rs (Fenster, Menue, Tray).
 
 #![windows_subsystem = "windows"]
@@ -15,6 +16,7 @@ mod app;
 mod config;
 mod gfx;
 mod ping;
+mod power;
 mod stats;
 
 use std::ffi::c_void;
@@ -34,11 +36,12 @@ use windows_sys::Win32::UI::Shell::{ShellExecuteW, Shell_NotifyIconW, NIF_ICON, 
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use app::{with_app, App, Hit};
-use config::KNOWN_MODULES;
+use config::{KNOWN_MODULES, THEMES};
 use ping::WM_PING;
 
 const FONT_NAME: &str = "Consolas";
 const FONT_PT: f32 = 9.0;
+const SMALL_FONT_PT: f32 = 7.5;
 
 const WM_TRAY: u32 = WM_APP + 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -49,6 +52,8 @@ const MENU_EXIT: usize = 4;
 const MENU_TOGGLE: usize = 5;
 const MENU_LOCK: usize = 6;
 const MENU_RESETPOS: usize = 7;
+const MENU_POWER_AUTO: usize = 8;
+const MENU_COLOR: usize = 200; // + Index in THEMES
 const MENU_MODULE: usize = 100; // + Index in KNOWN_MODULES
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const RUN_VALUE: &str = "Sysglow";
@@ -110,13 +115,19 @@ fn shell_open(cmd: &str) {
 
 // ---------------------------------------------------------------- Menue
 unsafe fn show_menu(hwnd: HWND) {
-    let Some((hidden, locked, modules)) = with_app(|a| (a.user_hidden, a.settings.locked, a.settings.modules.clone())) else { return };
+    let Some((hidden, locked, modules, power_auto, color)) =
+        with_app(|a| (a.user_hidden, a.settings.locked, a.settings.modules.clone(), a.settings.power_auto, a.settings.color.clone()))
+    else {
+        return;
+    };
     let auto = autostart_enabled();
     let check = |b: bool| if b { MF_CHECKED } else { 0 };
     let sub = CreatePopupMenu();
     for (i, m) in KNOWN_MODULES.iter().enumerate() {
         let label = match *m {
             "kopf" => "Kopfzeile",
+            "uhr" => "Datum und Uhrzeit",
+            "energie" => "Energieplan",
             "cpu" => "CPU",
             "ram" => "RAM",
             "platten" => "Platten",
@@ -125,9 +136,17 @@ unsafe fn show_menu(hwnd: HWND) {
         };
         AppendMenuW(sub, MF_STRING | check(modules.iter().any(|x| x == m)), MENU_MODULE + i, wide(label).as_ptr());
     }
+    let colors = CreatePopupMenu();
+    for (i, t) in THEMES.iter().enumerate() {
+        let mut label = t.0.replace("ue", "ü").replace("ss", "ß");
+        label[..1].make_ascii_uppercase();
+        AppendMenuW(colors, MF_STRING | check(color == t.0), MENU_COLOR + i, wide(&label).as_ptr());
+    }
     let menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, MENU_TOGGLE, wide(if hidden { "Einblenden" } else { "Ausblenden" }).as_ptr());
     AppendMenuW(menu, MF_POPUP, sub as usize, wide("Elemente").as_ptr());
+    AppendMenuW(menu, MF_POPUP, colors as usize, wide("Farbe").as_ptr());
+    AppendMenuW(menu, MF_STRING | check(power_auto), MENU_POWER_AUTO, wide("Energieplan bei Spielen umschalten").as_ptr());
     AppendMenuW(menu, MF_STRING | check(locked), MENU_LOCK, wide("Position sperren").as_ptr());
     AppendMenuW(menu, MF_STRING, MENU_RESETPOS, wide("Position zurücksetzen").as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, null());
@@ -141,7 +160,7 @@ unsafe fn show_menu(hwnd: HWND) {
     SetForegroundWindow(hwnd);
     let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, null()) as usize;
     PostMessageW(hwnd, WM_NULL, 0, 0);
-    DestroyMenu(menu); // zerstoert das Untermenue mit
+    DestroyMenu(menu); // zerstoert die Untermenues mit
     match cmd {
         MENU_TOGGLE => {
             with_app(|a| a.set_user_hidden(!hidden));
@@ -173,9 +192,15 @@ unsafe fn show_menu(hwnd: HWND) {
             });
         }
         MENU_AUTOSTART => set_autostart(!auto),
+        MENU_POWER_AUTO => {
+            with_app(|a| a.set_power_auto(!power_auto));
+        }
         MENU_EXIT => {
             EXITING.store(true, Relaxed);
             DestroyWindow(hwnd);
+        }
+        c if (MENU_COLOR..MENU_COLOR + THEMES.len()).contains(&c) => {
+            with_app(|a| a.set_color(THEMES[c - MENU_COLOR].0));
         }
         c if (MENU_MODULE..MENU_MODULE + KNOWN_MODULES.len()).contains(&c) => {
             with_app(|a| a.toggle_module(KNOWN_MODULES[c - MENU_MODULE]));
@@ -272,8 +297,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     a.set_key("pos_y", &rc.top.to_string());
                 } else if a.ignore_up {
                     a.ignore_up = false;
-                } else if let Some(Hit::Ping(i)) = a.hit_at(mouse_y) {
-                    a.toggle_graph(i);
+                } else {
+                    match a.hit_at(mouse_y) {
+                        Some(Hit::Ping(i)) => a.toggle_graph(i),
+                        Some(Hit::Power) => a.toggle_plan(),
+                        _ => {}
+                    }
                 }
             });
             0
@@ -298,6 +327,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     }
                     Hit::Disk(i) => format!("explorer.exe {}", a.stats.disks.get(i)?.root),
                     Hit::Cpu | Hit::Ram | Hit::Net => "taskmgr.exe".to_string(),
+                    Hit::Power => {
+                        a.toggle_plan(); // ersten Klick des Doppelklicks rueckgaengig machen
+                        "control.exe powercfg.cpl".to_string()
+                    }
                 };
                 a.ignore_up = true;
                 Some(c)
@@ -392,8 +425,8 @@ fn main() {
             null(),
         );
 
-        let font = CreateFontW(
-            -((FONT_PT * scale * 96.0 / 72.0).round() as i32),
+        let make_font = |pt: f32| CreateFontW(
+            -((pt * scale * 96.0 / 72.0).round() as i32),
             0,
             0,
             0,
@@ -408,9 +441,11 @@ fn main() {
             0,
             wide(FONT_NAME).as_ptr(),
         );
+        let font = make_font(FONT_PT);
+        let small_font = make_font(SMALL_FONT_PT);
 
         let cfg_path = std::env::current_exe().map(|p| p.with_file_name("sysglow.ini")).unwrap_or_else(|_| "sysglow.ini".into());
-        let mut app = App::new(hwnd, scale, font, cfg_path);
+        let mut app = App::new(hwnd, scale, font, small_font, cfg_path);
         app.load_config(); // startet auch den Mess-Timer
         app.stats.sample();
         app.update_visibility();

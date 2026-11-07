@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::mem::zeroed;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
@@ -35,6 +36,7 @@ pub enum Hit {
     Disk(usize),
     Net,
     Ping(usize),
+    Power,
 }
 
 pub struct Host {
@@ -59,6 +61,12 @@ pub struct App {
     pub hosts: Vec<Host>,
     pub stats: Stats,
     computer: String,
+    small_font: HFONT,
+    /// aktiver Energieplan (GUID), bekannte Plan-Namen und erkanntes Spiel
+    pub plan: Option<String>,
+    plan_names: Vec<(String, String)>,
+    pub game: Option<String>,
+    game_prev: bool,
     pub hover: Option<Hit>,
     hits: Vec<(i32, i32, Hit)>,
     pub tracking: bool,
@@ -103,15 +111,46 @@ fn mtime(p: &PathBuf) -> Option<SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
 }
 
-fn fullscreen_active() -> bool {
+/// 2 = Vollbild-App, 3 = Direct3D-Vollbild (Spiel), 4 = Praesentationsmodus
+fn notification_state() -> i32 {
     use windows_sys::Win32::UI::Shell::SHQueryUserNotificationState;
     let mut st = 0;
-    // 2 = Vollbild-App, 3 = Direct3D-Vollbild (Spiel), 4 = Praesentationsmodus
-    unsafe { SHQueryUserNotificationState(&mut st) == 0 && matches!(st, 2..=4) }
+    if unsafe { SHQueryUserNotificationState(&mut st) } == 0 {
+        st
+    } else {
+        0
+    }
+}
+
+fn fullscreen_active() -> bool {
+    matches!(notification_state(), 2..=4)
+}
+
+const WOCHENTAG: [&str; 7] = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+
+/// Kalenderwoche nach ISO 8601.
+pub fn iso_week(y: i32, m: u32, d: u32) -> u32 {
+    let leap = |y: i32| (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let cum = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    let doy = |y: i32, m: u32, d: u32| cum[(m - 1) as usize] + d + u32::from(m > 2 && leap(y));
+    // Wochentag 1 = Mo .. 7 = So (1.1.0001 war ein Montag)
+    let wd = |y: i32, m: u32, d: u32| {
+        let yy = (y - 1) as i64;
+        let days = yy * 365 + yy / 4 - yy / 100 + yy / 400 + doy(y, m, d) as i64;
+        ((days - 1).rem_euclid(7) + 1) as u32
+    };
+    let w = (doy(y, m, d) as i32 - wd(y, m, d) as i32 + 10) / 7;
+    if w < 1 {
+        iso_week(y - 1, 12, 31)
+    } else if w == 53 && wd(y, 12, 31) < 4 {
+        1
+    } else {
+        w as u32
+    }
 }
 
 impl App {
-    pub unsafe fn new(hwnd: HWND, scale: f32, font: HFONT, cfg_path: PathBuf) -> App {
+    pub unsafe fn new(hwnd: HWND, scale: f32, font: HFONT, small_font: HFONT, cfg_path: PathBuf) -> App {
         App {
             hwnd,
             cfg_path,
@@ -120,6 +159,11 @@ impl App {
             hosts: Vec::new(),
             stats: Stats::new(),
             computer: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into()),
+            small_font,
+            plan: None,
+            plan_names: Vec::new(),
+            game: None,
+            game_prev: false,
             hover: None,
             hits: Vec::new(),
             tracking: false,
@@ -149,7 +193,7 @@ impl App {
         } else if pct >= self.settings.yellow {
             COL_YELLOW
         } else {
-            COL_FG
+            self.settings.fg
         }
     }
 
@@ -245,6 +289,48 @@ impl App {
         }
     }
 
+    fn plan_label(&mut self, guid: &str) {
+        if !self.plan_names.iter().any(|(g, _)| g == guid) {
+            let n = crate::power::plan_name(guid);
+            self.plan_names.push((guid.to_string(), n));
+        }
+    }
+
+    /// Spiel erkennen und bei Start/Ende den Energieplan umschalten (nur beim Wechsel, manuelles Umstellen bleibt).
+    fn update_power(&mut self) {
+        let st = &self.settings;
+        self.game = crate::power::running_game(&st.games).or_else(|| (notification_state() == 3).then(|| "Vollbild-Spiel".to_string()));
+        let now = self.game.is_some();
+        if st.power_auto && now != self.game_prev {
+            let target = if now { st.plan_game.clone() } else { st.plan_normal.clone() };
+            crate::power::set_plan(&target);
+        }
+        self.game_prev = now;
+        self.plan = crate::power::active_plan();
+    }
+
+    /// Klick auf die Energie-Zeile: zwischen plan_normal und plan_spiel wechseln.
+    pub fn toggle_plan(&mut self) {
+        let st = &self.settings;
+        let target = if self.plan.as_deref() == Some(st.plan_game.as_str()) { st.plan_normal.clone() } else { st.plan_game.clone() };
+        crate::power::set_plan(&target);
+        self.plan = crate::power::active_plan();
+        self.render();
+    }
+
+    pub fn set_power_auto(&mut self, on: bool) {
+        self.settings.power_auto = on;
+        self.set_key("energie_auto", if on { "1" } else { "0" });
+        self.render();
+    }
+
+    pub fn set_color(&mut self, name: &str) {
+        self.set_key("farbe", name);
+        self.set_key("akzent", "");
+        self.load_config();
+        self.render();
+    }
+
     pub fn toggle_module(&mut self, m: &str) {
         self.settings.modules = toggle_module(&self.settings.modules, m);
         let v = self.settings.modules.join(" ");
@@ -276,6 +362,7 @@ impl App {
             self.load_config();
         }
         self.stats.sample();
+        self.update_power();
         self.update_visibility();
         self.render();
     }
@@ -294,21 +381,36 @@ impl App {
     }
 
     // ------------------------------------------------------------ Text-Helfer
-    fn measure(&self, s: &str) -> i32 {
+    fn measure_font(&self, s: &str, font: HFONT) -> i32 {
         let ws: Vec<u16> = s.encode_utf16().collect();
         let mut sz = SIZE { cx: 0, cy: 0 };
-        unsafe { GetTextExtentPoint32W(self.text.dc, ws.as_ptr(), ws.len() as i32, &mut sz) };
+        unsafe {
+            let old = if font.is_null() { null_mut() } else { SelectObject(self.text.dc, font as HGDIOBJ) };
+            GetTextExtentPoint32W(self.text.dc, ws.as_ptr(), ws.len() as i32, &mut sz);
+            if !old.is_null() {
+                SelectObject(self.text.dc, old);
+            }
+        }
         sz.cx
+    }
+
+    fn measure(&self, s: &str) -> i32 {
+        self.measure_font(s, null_mut())
     }
 
     /// Text in die aktuelle Zeile; bei `right` ist x die rechte Kante. Gibt die belegte Breite zurueck.
     fn put(&self, f: &mut Frame, s: &str, x: i32, right: bool, maxw: i32, col: u32) -> i32 {
-        let tw = self.measure(s).min(maxw.max(0));
+        self.put_font(f, s, x, right, maxw, col, null_mut())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn put_font(&self, f: &mut Frame, s: &str, x: i32, right: bool, maxw: i32, col: u32, font: HFONT) -> i32 {
+        let tw = self.measure_font(s, font).min(maxw.max(0));
         if tw <= 0 {
             return 0;
         }
         let x0 = if right { x - tw } else { x };
-        f.ops.push(TextOp { s: s.encode_utf16().collect(), rc: rect(x0, f.y, x0 + tw, f.y + f.rh), col });
+        f.ops.push(TextOp { s: s.encode_utf16().collect(), rc: rect(x0, f.y, x0 + tw, f.y + f.rh), col, font });
         tw
     }
 
@@ -317,8 +419,41 @@ impl App {
         let up = self.stats.uptime;
         let (d, hh, mm) = (up / 86400, up / 3600 % 24, up / 60 % 60);
         let ut = if d > 0 { format!("up {d}d {hh:02}:{mm:02}") } else { format!("up {hh:02}:{mm:02}") };
-        let uw = self.put(f, &ut, f.w - f.pad, true, f.inner, COL_DIM);
-        self.put(f, &format!("> SYS://{}", self.computer), f.pad, false, f.inner - uw - f.gap, COL_CYAN);
+        let sf = self.small_font;
+        let uw = self.put_font(f, &ut, f.w - f.pad, true, f.inner, self.settings.dim, sf);
+        self.put_font(f, &self.computer, f.pad, false, f.inner - uw - f.gap, self.settings.accent, sf);
+        f.y += f.rh;
+    }
+
+    fn el_uhr(&self, f: &mut Frame) {
+        let t = unsafe {
+            let mut t = zeroed::<SYSTEMTIME>();
+            windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut t);
+            t
+        };
+        let tw = self.put(f, &format!("{:02}:{:02}", t.wHour, t.wMinute), f.w - f.pad, true, f.inner, self.settings.fg);
+        let kw = iso_week(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
+        let d = format!("{} {:02}.{:02}.{}  KW{}", WOCHENTAG[t.wDayOfWeek as usize % 7], t.wDay, t.wMonth, t.wYear, kw);
+        self.put(f, &d, f.pad, false, f.inner - tw - f.gap, self.settings.dim);
+        f.y += f.rh;
+    }
+
+    fn el_energie(&self, f: &mut Frame) {
+        let st = &self.settings;
+        let plan = self.plan.clone().unwrap_or_default();
+        let name = self.plan_names.iter().find(|(g, _)| *g == plan).map_or("?".to_string(), |x| x.1.clone());
+        let col = if plan == st.plan_game { st.accent } else { st.dim };
+        let right = match (&self.game, self.hover == Some(Hit::Power)) {
+            (_, true) => "Klick: wechseln".to_string(),
+            (Some(g), _) => g.clone(),
+            (None, _) if st.power_auto => "auto".to_string(),
+            (None, _) => "manuell".to_string(),
+        };
+        let rcol = if self.game.is_some() { COL_YELLOW } else { st.dim };
+        let rw = self.put(f, &right, f.w - f.pad, true, f.inner, rcol);
+        let lw = self.put(f, "PWR", f.pad, false, f.inner, st.fg);
+        self.put(f, &name, f.pad + lw + f.gap, false, f.inner - lw - rw - 2 * f.gap, col);
+        f.hits.push((f.y, f.y + f.rh, Hit::Power));
         f.y += f.rh;
     }
 
@@ -328,15 +463,15 @@ impl App {
         let pcol = self.measure("100%");
         self.put(f, &format!("{:.0}%", st.cpu), f.w - f.pad, true, f.inner, self.level(st.cpu));
         let gw = if st.ghz > 0.0 {
-            self.put(f, &format!("{:.1} GHz", st.ghz), f.w - f.pad - pcol - f.gap, true, f.inner, COL_CYAN) + f.gap
+            self.put(f, &format!("{:.1} GHz", st.ghz), f.w - f.pad - pcol - f.gap, true, f.inner, self.settings.accent) + f.gap
         } else {
             0
         };
-        let lw = self.put(f, "CPU", f.pad, false, f.inner, COL_FG);
-        self.put(f, &st.cpu_name, f.pad + lw + f.gap, false, f.inner - lw - pcol - gw - 2 * f.gap, COL_DIM);
+        let lw = self.put(f, "CPU", f.pad, false, f.inner, self.settings.fg);
+        self.put(f, &st.cpu_name, f.pad + lw + f.gap, false, f.inner - lw - pcol - gw - 2 * f.gap, self.settings.dim);
         f.y += f.rh;
         let sh = self.px(SPARK_H);
-        f.dr.push(Draw::Spark(rect(f.pad, f.y, f.w - f.pad, f.y + sh), st.cpu_hist.iter().copied().collect(), COL_FG));
+        f.dr.push(Draw::Spark(rect(f.pad, f.y, f.w - f.pad, f.y + sh), st.cpu_hist.iter().copied().collect(), self.settings.fg));
         f.y += sh + self.px(3.0);
         f.hits.push((y0, f.y, Hit::Cpu));
     }
@@ -348,8 +483,8 @@ impl App {
         let detail = if self.hover == Some(Hit::Ram) { format!("frei {:.1} GB", gb(a)) } else { format!("{:.1} / {:.1} GB", gb(t - a), gb(t)) };
         let pcol = self.measure("100%");
         self.put(f, &format!("{pct:.0}%"), f.w - f.pad, true, f.inner, self.level(pct));
-        let lw = self.put(f, "RAM", f.pad, false, f.inner, COL_FG);
-        self.put(f, &detail, f.pad + lw + f.gap, false, f.inner - lw - pcol - 2 * f.gap, COL_DIM);
+        let lw = self.put(f, "RAM", f.pad, false, f.inner, self.settings.fg);
+        self.put(f, &detail, f.pad + lw + f.gap, false, f.inner - lw - pcol - 2 * f.gap, self.settings.dim);
         f.y += f.rh;
         let bh = self.px(BAR_H);
         f.dr.push(Draw::Bar(rect(f.pad, f.y, f.w - f.pad, f.y + bh), pct / 100.0, self.level(pct)));
@@ -364,10 +499,10 @@ impl App {
             let letter = &d.root[..2];
             if self.hover == Some(Hit::Disk(i)) {
                 let s = format!("{letter} {:.0} GB frei / {:.0} GB", gb(d.free as f64), gb(d.total as f64));
-                self.put(f, &s, f.pad, false, f.inner, COL_FG);
+                self.put(f, &s, f.pad, false, f.inner, self.settings.fg);
             } else {
                 self.put(f, &format!("{pct:.0}%"), f.w - f.pad, true, f.inner, self.level(pct));
-                let lw = self.put(f, letter, f.pad, false, f.inner, COL_FG);
+                let lw = self.put(f, letter, f.pad, false, f.inner, self.settings.fg);
                 let bh = self.px(DISK_BAR_H);
                 let by = f.y + (f.rh - bh) / 2;
                 f.dr.push(Draw::Bar(rect(f.pad + lw + f.gap, by, f.w - f.pad - pcol - f.gap, by + bh), pct / 100.0, self.level(pct)));
@@ -379,12 +514,12 @@ impl App {
 
     fn el_netz(&self, f: &mut Frame) {
         let (y0, st) = (f.y, &self.stats);
-        let uw = self.put(f, &format!("\u{2191} {}", rate(st.up)), f.w - f.pad, true, f.inner, COL_CYAN);
-        self.put(f, &format!("\u{2193} {}", rate(st.down)), f.pad, false, f.inner - uw - f.gap, COL_CYAN);
+        let uw = self.put(f, &format!("\u{2191} {}", rate(st.up)), f.w - f.pad, true, f.inner, self.settings.accent);
+        self.put(f, &format!("\u{2193} {}", rate(st.down)), f.pad, false, f.inner - uw - f.gap, self.settings.accent);
         f.y += f.rh;
         let nh = self.px(NET_SPARK_H);
         let max = st.net_hist.iter().fold(1024.0f32, |m, &v| m.max(v));
-        f.dr.push(Draw::Spark(rect(f.pad, f.y, f.w - f.pad, f.y + nh), st.net_hist.iter().map(|v| v / max).collect(), COL_CYAN));
+        f.dr.push(Draw::Spark(rect(f.pad, f.y, f.w - f.pad, f.y + nh), st.net_hist.iter().map(|v| v / max).collect(), self.settings.accent));
         f.y += nh + self.px(3.0);
         f.hits.push((y0, f.y, Hit::Net));
     }
@@ -397,7 +532,7 @@ impl App {
             let s = host.status.lock().unwrap().0;
             let col = match s {
                 Status::Pending => COL_GRAY,
-                Status::Ok(ms) if ms < host.cfg.yellow => COL_FG,
+                Status::Ok(ms) if ms < host.cfg.yellow => self.settings.fg,
                 Status::Ok(ms) if ms < host.cfg.red => COL_YELLOW,
                 _ => COL_RED,
             };
@@ -408,13 +543,13 @@ impl App {
             };
             let vw = self.put(f, &val, f.w - f.pad - dotw, true, f.inner, col);
             let name = if self.hover == Some(Hit::Ping(i)) { &host.cfg.addr } else { &host.cfg.name };
-            self.put(f, name, f.pad, false, f.inner - dotw - vw - f.gap, COL_FG);
+            self.put(f, name, f.pad, false, f.inner - dotw - vw - f.gap, self.settings.fg);
             f.dr.push(Draw::Dot((f.w - f.pad) as f32 - DOT_R * self.scale - 1.0, f.y as f32 + f.rh as f32 / 2.0, col));
             f.y += f.rh;
             if host.cfg.graph {
                 // Graph UNTER der Zeile, damit sich darueber nichts verschiebt
                 let gh = self.px(GRAPH_H);
-                f.dr.push(Draw::Line(rect(f.pad, f.y + 1, f.w - f.pad, f.y + 1 + gh), host.hist.iter().map(|v| v / gmax).collect(), COL_CYAN));
+                f.dr.push(Draw::Line(rect(f.pad, f.y + 1, f.w - f.pad, f.y + 1 + gh), host.hist.iter().map(|v| v / gmax).collect(), self.settings.accent));
                 f.y += gh + self.px(3.0);
             }
             f.hits.push((yh, f.y, Hit::Ping(i)));
@@ -426,6 +561,9 @@ impl App {
         if !self.visible {
             return;
         }
+        if let Some(p) = self.plan.clone() {
+            self.plan_label(&p);
+        }
         let w = self.px(self.settings.width);
         let pad = self.px(PAD);
         let mut f = Frame { ops: Vec::new(), dr: Vec::new(), hits: Vec::new(), y: self.px(3.0), w, pad, gap: self.px(GAP), rh: self.px(ROW_H), inner: w - 2 * pad };
@@ -433,11 +571,13 @@ impl App {
         for (mi, m) in self.settings.modules.iter().enumerate() {
             if mi > 0 {
                 let sh = self.px(SEP_H);
-                f.dr.push(Draw::Fill(rect(pad, f.y + sh / 2, w - pad, f.y + sh / 2 + 1), COL_DIM, 0.5));
+                f.dr.push(Draw::Fill(rect(pad, f.y + sh / 2, w - pad, f.y + sh / 2 + 1), self.settings.dim, 0.5));
                 f.y += sh;
             }
             match m.as_str() {
                 "kopf" => self.el_kopf(&mut f),
+                "uhr" => self.el_uhr(&mut f),
+                "energie" => self.el_energie(&mut f),
                 "cpu" => self.el_cpu(&mut f),
                 "ram" => self.el_ram(&mut f),
                 "platten" => self.el_platten(&mut f),
@@ -474,5 +614,18 @@ impl App {
             UpdateLayeredWindow(self.hwnd, null_mut(), &pos, &size, self.out.dc, &src, 0, &bf, ULW_ALPHA);
         }
         self.hits = f.hits;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::iso_week;
+    #[test]
+    fn kalenderwoche() {
+        assert_eq!(iso_week(2026, 11, 7), 45);
+        assert_eq!(iso_week(2026, 1, 1), 1);
+        assert_eq!(iso_week(2021, 1, 3), 53);
+        assert_eq!(iso_week(2024, 12, 30), 1);
+        assert_eq!(iso_week(2020, 12, 31), 53);
     }
 }

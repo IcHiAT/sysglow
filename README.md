@@ -4,13 +4,15 @@ Schlankes Desktop-Widget für Windows im Hacker-Stil – geschrieben in Rust, oh
 Ersetzt Rainmeter-Skins für Systemwerte und Ping.
 
 ```
-> SYS://MEINPC                up 05:35
+MEINPC                          up 05:35
+Sa 07.11.2026  KW45                22:11
 CPU i7-11700KF       4.7 GHz     13%
 ▁▂▁▃▂▁▁▅▂▁▁▂▁▁▁▂▃▁▁▂▁▁▁▁▂▁▁▁▂▁▁▁▁▂▁▁
 RAM 12.2 / 31.9 GB               38%
 ▮▮▮▮▮▮▮▮▮▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯
 C: ▮▮▮▮▮▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯          25%
 ↓ 4 KB/s                    ↑ 13 KB/s
+PWR Höchstleistung             r5apex
 Router                         1 ms ●
 Google                        13 ms ●
 ```
@@ -18,12 +20,16 @@ Google                        13 ms ●
 ## Funktionen
 
 - **Elemente**, jedes einzeln an/aus (Rechtsklick → *Elemente* oder `module =` in der ini):
-  - `kopf` – Rechnername und Laufzeit
+  - `kopf` – Rechnername (kleine Schrift) und Laufzeit
+  - `uhr` – Wochentag, Datum, Kalenderwoche, Uhrzeit
   - `cpu` – Last, aktueller Takt (GHz), Verlaufsgraph
   - `ram` – belegt/gesamt, Balken
   - `platten` – alle festen Laufwerke mit Füllstand
   - `netz` – Download/Upload mit Verlaufsgraph
+  - `energie` – aktiver Energieplan und erkanntes Spiel; Klick wechselt den Plan, Doppelklick öffnet die Energieoptionen
   - `ping` – beliebig viele Hosts (ICMP), Farbe nach Schwellwert, optional Graph
+- **Energieplan automatisch**: Startet ein Spiel (Prozess aus `spiele` oder Direct3D-Vollbild), schaltet glow auf `plan_spiel` (Höchstleistung); ist das Spiel beendet, zurück auf `plan_normal` (Ausbalanciert). Umgeschaltet wird nur beim Wechsel – wer zwischendurch von Hand umstellt, wird nicht überstimmt. Funktioniert auch, wenn das Element `energie` ausgeblendet ist; abschalten mit `energie_auto = 0` oder im Menü.
+- **Farben**: Rechtsklick → *Farbe* (grün, cyan, blau, lila, amber, rot, weiß) oder eigene Farbe als `RRGGBB` in der ini
 - Liegt nur auf dem Desktop (unter allen Fenstern), blendet sich bei Vollbild und Spielen aus
 - Tray-Icon, verschiebbar per Maus, Position wird gespeichert
 - Hover zeigt Details (freier Platz, IP-Adresse), Klick auf einen Ping schaltet dessen Graph
@@ -42,7 +48,7 @@ Google                        13 ms ●
 
 | Schlüssel | Bedeutung | Standard |
 |---|---|---|
-| `module` | Elemente in Reihenfolge: `kopf cpu ram platten netz ping` | alle |
+| `module` | Elemente in Reihenfolge: `kopf uhr cpu ram platten netz energie ping` | alle |
 | `breite` | Breite in Pixeln (100 % Skalierung) | 220 |
 | `aktualisierung` | Sekunden zwischen Messungen von CPU, RAM, Platten, Netz | 1 |
 | `intervall` | Sekunden zwischen zwei Pings (Werte und Ping-Graph) | 5 |
@@ -53,6 +59,11 @@ Google                        13 ms ●
 | `rand_rechts` / `rand_oben` | Abstand zum Rand, solange nicht verschoben | 0 |
 | `pos_x` / `pos_y` | gespeicherte Position | – |
 | `gesperrt` | 1 = nicht verschiebbar | 0 |
+| `farbe` | Schema (`gruen cyan blau lila amber rot weiss`) oder `RRGGBB` | gruen |
+| `akzent` | zweite Farbe `RRGGBB` (Netz, Takt, Graphen), leer = zum Schema passend | – |
+| `energie_auto` | 1 = Energieplan bei Spielstart/-ende umschalten | 1 |
+| `plan_spiel` / `plan_normal` | GUIDs aus `powercfg /list` | Höchstleistung / Ausbalanciert |
+| `spiele` | Prozessnamen ohne `.exe`, Leerzeichen getrennt | `r5apex r5apex_dx12` |
 
 Ping-Hosts, eine Zeile pro Host:
 
@@ -81,6 +92,7 @@ Ergebnis: `target\release\sysglow.exe`.
 | `src/config.rs` | ini lesen, Standardwerte, Elemente an/aus |
 | `src/stats.rs` | Systemwerte (CPU, Takt, RAM, Platten, Netz) |
 | `src/ping.rs` | ICMP-Ping im Hintergrund-Thread pro Host |
+| `src/power.rs` | Energieplan lesen/setzen, laufende Spiele erkennen |
 | `src/gfx.rs` | Zeichnen (Text mit Kontur, Balken, Graphen), Tray-Icon |
 
 Ein neues Element: Namen in `KNOWN_MODULES` (`config.rs`) eintragen, `el_<name>` in `app.rs` schreiben und in `render()` zuordnen, Menütext in `show_menu()` (`main.rs`) ergänzen.

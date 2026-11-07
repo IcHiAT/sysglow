@@ -9,8 +9,6 @@ use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, HICON, ICONINFO};
 
 pub const COL_FG: u32 = 0x7CFFB2;
-pub const COL_DIM: u32 = 0x5FA585;
-pub const COL_CYAN: u32 = 0x40C8FF;
 pub const COL_YELLOW: u32 = 0xFFCC4D;
 pub const COL_RED: u32 = 0xFF5C5C;
 pub const COL_GRAY: u32 = 0x808080;
@@ -27,6 +25,8 @@ pub struct TextOp {
     pub s: Vec<u16>,
     pub rc: RECT,
     pub col: u32,
+    /// abweichende Schrift (null = Standardschrift der Flaeche)
+    pub font: HFONT,
 }
 
 /// Grafik-Befehle, die die Elemente erzeugen.
@@ -114,7 +114,11 @@ pub unsafe fn compose(text_s: &Surface, out_s: &Surface, w: i32, h: i32, bg: u8,
     text.fill(0);
     for op in ops {
         let mut rc = op.rc;
+        let old = if op.font.is_null() { null_mut() } else { SelectObject(text_s.dc, op.font as HGDIOBJ) };
         DrawTextW(text_s.dc, op.s.as_ptr(), op.s.len() as i32, &mut rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        if !old.is_null() {
+            SelectObject(text_s.dc, old);
+        }
     }
     GdiFlush();
 
