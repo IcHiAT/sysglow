@@ -35,14 +35,16 @@ Google                        13 ms ●
 - Hover zeigt Details (freier Platz, IP-Adresse), Klick auf einen Ping schaltet dessen Graph
 - Doppelklick: CPU/RAM/Netz → Task-Manager, Laufwerk → Explorer, Ping → eigener Befehl
 - ini wird beim Speichern automatisch neu geladen
-- Sehr sparsam: ca. 450 KB exe, ca. 18 MB RAM, kaum CPU
+- Sehr sparsam: ca. 770 KB exe, ca. 18 MB RAM, kaum CPU
 - Nur normale Windows-Abfragen (kein Treiber, keine Injektion) – unauffällig für Anti-Cheat
 
 ## Installation
 
-1. `sysglow.exe` in einen eigenen Ordner legen, z. B. `%LOCALAPPDATA%\Programs\Sysglow\`.
-2. Starten – beim ersten Start entsteht `sysglow.ini` daneben.
+1. `Sysglow.exe` von der [Release-Seite](https://github.com/IcHiAT/sysglow/releases/latest) laden und in einen eigenen Ordner legen, z. B. `%LOCALAPPDATA%\Programs\Sysglow\`.
+2. Starten – beim ersten Start entsteht `sysglow.ini` daneben. Die exe ist nicht signiert, deshalb kann Windows SmartScreen beim ersten Start warnen („Weitere Informationen“ → „Trotzdem ausführen“).
 3. Rechtsklick → *Mit Windows starten* für Autostart.
+
+Läuft unter Windows 10/11. Die Benutzung erfolgt auf eigene Gefahr.
 
 ## Konfiguration (`sysglow.ini`)
 
@@ -96,3 +98,11 @@ Ergebnis: `target\release\sysglow.exe`.
 | `src/gfx.rs` | Zeichnen (Text mit Kontur, Balken, Graphen), Tray-Icon |
 
 Ein neues Element: Namen in `KNOWN_MODULES` (`config.rs`) eintragen, `el_<name>` in `app.rs` schreiben und in `render()` zuordnen, Menütext in `show_menu()` (`main.rs`) ergänzen.
+
+## Name und Icon in der exe
+
+Der Task-Manager zeigt Dateibeschreibung, Herausgeber (`-Firma`, Standard IcHiAT) und Icon der exe, im Autostart-Tab erst nach einigen Sekunden. Der GNU-Toolchain bindet keine Ressourcen ein, deshalb nach jedem Build:
+
+```powershell
+.\werkzeug\ressourcen.ps1 -Exe <pfad>\sysglow.exe -Ico .\assets\sysglow.ico -Name Sysglow -Version 0.3.0
+```
