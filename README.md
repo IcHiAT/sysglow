@@ -3,19 +3,7 @@
 Schlankes Desktop-Widget für Windows im Hacker-Stil – geschrieben in Rust, ohne Laufzeit, ohne Treiber.
 Ersetzt Rainmeter-Skins für Systemwerte und Ping.
 
-```
-MEINPC                          up 05:35
-Sa 07.11.2026  KW45                22:11
-CPU i7-11700KF       4.7 GHz     13%
-▁▂▁▃▂▁▁▅▂▁▁▂▁▁▁▂▃▁▁▂▁▁▁▁▂▁▁▁▂▁▁▁▁▂▁▁
-RAM 12.2 / 31.9 GB               38%
-▮▮▮▮▮▮▮▮▮▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯
-C: ▮▮▮▮▮▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯          25%
-↓ 4 KB/s                    ↑ 13 KB/s
-PWR Höchstleistung             r5apex
-Router                         1 ms ●
-Google                        13 ms ●
-```
+![Sysglow mit allen Elementen](assets/screenshot.png)
 
 ## Funktionen
 
