@@ -17,6 +17,7 @@ mod config;
 mod gfx;
 mod ping;
 mod power;
+mod startmenue;
 mod stats;
 
 use std::ffi::c_void;
@@ -53,6 +54,7 @@ const MENU_TOGGLE: usize = 5;
 const MENU_LOCK: usize = 6;
 const MENU_RESETPOS: usize = 7;
 const MENU_POWER_AUTO: usize = 8;
+const MENU_STARTMENUE: usize = 9;
 const MENU_COLOR: usize = 200; // + Index in THEMES
 const MENU_MODULE: usize = 100; // + Index in KNOWN_MODULES
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -121,6 +123,7 @@ unsafe fn show_menu(hwnd: HWND) {
         return;
     };
     let auto = autostart_enabled();
+    let im_startmenue = startmenue::vorhanden("Sysglow");
     let check = |b: bool| if b { MF_CHECKED } else { 0 };
     let sub = CreatePopupMenu();
     for (i, m) in KNOWN_MODULES.iter().enumerate() {
@@ -153,6 +156,7 @@ unsafe fn show_menu(hwnd: HWND) {
     AppendMenuW(menu, MF_STRING, MENU_CONFIG, wide("Konfiguration bearbeiten").as_ptr());
     AppendMenuW(menu, MF_STRING, MENU_RELOAD, wide("Neu laden").as_ptr());
     AppendMenuW(menu, MF_STRING | check(auto), MENU_AUTOSTART, wide("Mit Windows starten").as_ptr());
+    AppendMenuW(menu, MF_STRING | check(im_startmenue), MENU_STARTMENUE, wide("Im Startmenü anzeigen").as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, null());
     AppendMenuW(menu, MF_STRING, MENU_EXIT, wide("Beenden").as_ptr());
     let mut pt = POINT { x: 0, y: 0 };
@@ -192,6 +196,7 @@ unsafe fn show_menu(hwnd: HWND) {
             });
         }
         MENU_AUTOSTART => set_autostart(!auto),
+        MENU_STARTMENUE => startmenue::setzen("Sysglow", !im_startmenue),
         MENU_POWER_AUTO => {
             with_app(|a| a.set_power_auto(!power_auto));
         }

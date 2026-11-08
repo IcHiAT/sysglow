@@ -30,7 +30,7 @@ Ersetzt Rainmeter-Skins für Systemwerte und Ping.
 
 1. `Sysglow.exe` von der [Release-Seite](https://github.com/IcHiAT/sysglow/releases/latest) laden und in einen eigenen Ordner legen, z. B. `%LOCALAPPDATA%\Programs\Sysglow\`.
 2. Starten – beim ersten Start entsteht `sysglow.ini` daneben. Die exe ist nicht signiert, deshalb kann Windows SmartScreen beim ersten Start warnen („Weitere Informationen“ → „Trotzdem ausführen“).
-3. Rechtsklick → *Mit Windows starten* für Autostart.
+3. Rechtsklick → *Mit Windows starten* für Autostart, *Im Startmenü anzeigen* für den Eintrag im Startmenü.
 
 Läuft unter Windows 10/11. Die Benutzung erfolgt auf eigene Gefahr.
 
@@ -92,5 +92,5 @@ Ein neues Element: Namen in `KNOWN_MODULES` (`config.rs`) eintragen, `el_<name>`
 Der Task-Manager zeigt Dateibeschreibung, Herausgeber (`-Firma`, Standard IcHiAT) und Icon der exe, im Autostart-Tab erst nach einigen Sekunden. Der GNU-Toolchain bindet keine Ressourcen ein, deshalb nach jedem Build:
 
 ```powershell
-.\werkzeug\ressourcen.ps1 -Exe <pfad>\sysglow.exe -Ico .\assets\sysglow.ico -Name Sysglow -Version 0.3.0
+.\werkzeug\ressourcen.ps1 -Exe <pfad>\sysglow.exe -Ico .\assets\sysglow.ico -Name Sysglow -Version 0.3.1
 ```
