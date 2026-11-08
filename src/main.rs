@@ -4,7 +4,7 @@
 //! Konfiguration: sysglow.ini neben der exe (wird bei Aenderung automatisch neu geladen).
 //!
 //! Liegt nur auf dem Desktop (unter allen Fenstern) und blendet sich bei Vollbild/Spielen aus.
-//! Maus: ziehen = verschieben, Hover = Details, Klick auf Ping = Graph an/aus,
+//! Maus: ziehen = verschieben, Hover = Details (auf Graphen: Uhrzeit und Wert), Klick auf Datum = Kalender, Klick auf Ping = Graph an/aus,
 //! Doppelklick = Befehl / Task-Manager / Laufwerk oeffnen, Rechtsklick oder Tray-Icon = Menue.
 //!
 //! Aufbau: config.rs (ini), stats.rs (Systemwerte), ping.rs (ICMP), power.rs (Energieplan, Spiele), gfx.rs (Zeichnen),
@@ -15,6 +15,7 @@
 mod app;
 mod config;
 mod gfx;
+mod kalender;
 mod ping;
 mod power;
 mod startmenue;
@@ -217,6 +218,7 @@ unsafe fn show_menu(hwnd: HWND) {
 // ---------------------------------------------------------------- Fenster
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let mouse_y = (lp >> 16) as i16 as i32;
+    let mouse_x = lp as i16 as i32;
     match msg {
         WM_TIMER => {
             with_app(|a| a.tick());
@@ -272,19 +274,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     TrackMouseEvent(&mut t);
                     a.tracking = true;
                 }
-                let r = a.hit_at(mouse_y);
-                if r != a.hover {
-                    a.hover = r;
-                    a.render();
-                }
+                a.mouse_at(Some((mouse_x, mouse_y)));
             });
             0
         }
         WM_MOUSELEAVE => {
             with_app(|a| {
                 a.tracking = false;
-                a.hover = None;
-                a.render();
+                a.mouse_at(None);
             });
             0
         }
@@ -306,6 +303,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     match a.hit_at(mouse_y) {
                         Some(Hit::Ping(i)) => a.toggle_graph(i),
                         Some(Hit::Power) => a.toggle_plan(),
+                        Some(Hit::Uhr) => {
+                            let mut rc = zeroed::<RECT>();
+                            GetWindowRect(hwnd, &mut rc);
+                            let st = &a.settings;
+                            kalender::umschalten(rc, a.font, a.scale, st.fg, st.dim, st.accent);
+                        }
                         _ => {}
                     }
                 }
@@ -322,6 +325,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_LBUTTONDBLCLK => {
             let cmd = with_app(|a| {
                 let c = match a.hit_at(mouse_y)? {
+                    Hit::Uhr => {
+                        a.ignore_up = true; // zweiter Klick soll den Kalender nicht gleich wieder schliessen
+                        return None;
+                    }
                     Hit::Ping(i) => {
                         let sc = a.hosts[i].cfg.shortcut.clone();
                         if sc.is_empty() {

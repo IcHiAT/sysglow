@@ -5,6 +5,14 @@ Ersetzt Rainmeter-Skins für Systemwerte und Ping.
 
 ![Sysglow mit allen Elementen](assets/screenshot.png)
 
+Maus auf einem Graphen zeigt Uhrzeit und Wert der Messung:
+
+![Uhrzeit und Wert beim Hover auf dem CPU-Graphen](assets/screenshot-hover.png)
+
+Klick auf das Datum öffnet den Kalender:
+
+![Kalender links neben dem Widget](assets/screenshot-kalender.png)
+
 ## Funktionen
 
 - **Elemente**, jedes einzeln an/aus (Rechtsklick → *Elemente* oder `module =` in der ini):
@@ -21,6 +29,8 @@ Ersetzt Rainmeter-Skins für Systemwerte und Ping.
 - Liegt nur auf dem Desktop (unter allen Fenstern), blendet sich bei Vollbild und Spielen aus
 - Tray-Icon, verschiebbar per Maus, Position wird gespeichert
 - Hover zeigt Details (freier Platz, IP-Adresse), Klick auf einen Ping schaltet dessen Graph
+- Hover auf einen Graphen (CPU, Netz, Ping) zeigt Uhrzeit und Wert dieser Messung
+- Klick auf Datum oder Uhrzeit öffnet den Kalender links neben dem Widget: `<` `>`, Mausrad oder Pfeiltasten wechseln den Monat, Klick auf den Titel springt zu heute, Esc oder Klick daneben schließt
 - Doppelklick: CPU/RAM/Netz → Task-Manager, Laufwerk → Explorer, Ping → eigener Befehl
 - ini wird beim Speichern automatisch neu geladen
 - Sehr sparsam: ca. 770 KB exe, ca. 18 MB RAM, kaum CPU
@@ -83,6 +93,7 @@ Ergebnis: `target\release\sysglow.exe`.
 | `src/stats.rs` | Systemwerte (CPU, Takt, RAM, Platten, Netz) |
 | `src/ping.rs` | ICMP-Ping im Hintergrund-Thread pro Host |
 | `src/power.rs` | Energieplan lesen/setzen, laufende Spiele erkennen |
+| `src/kalender.rs` | Kalender-Popup |
 | `src/gfx.rs` | Zeichnen (Text mit Kontur, Balken, Graphen), Tray-Icon |
 
 Ein neues Element: Namen in `KNOWN_MODULES` (`config.rs`) eintragen, `el_<name>` in `app.rs` schreiben und in `render()` zuordnen, Menütext in `show_menu()` (`main.rs`) ergänzen.
@@ -92,5 +103,5 @@ Ein neues Element: Namen in `KNOWN_MODULES` (`config.rs`) eintragen, `el_<name>`
 Der Task-Manager zeigt Dateibeschreibung, Herausgeber (`-Firma`, Standard IcHiAT) und Icon der exe, im Autostart-Tab erst nach einigen Sekunden. Der GNU-Toolchain bindet keine Ressourcen ein, deshalb nach jedem Build:
 
 ```powershell
-.\werkzeug\ressourcen.ps1 -Exe <pfad>\sysglow.exe -Ico .\assets\sysglow.ico -Name Sysglow -Version 0.3.1
+.\werkzeug\ressourcen.ps1 -Exe <pfad>\sysglow.exe -Ico .\assets\sysglow.ico -Name Sysglow -Version 0.4.0
 ```

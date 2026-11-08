@@ -31,6 +31,7 @@ const GRAPH_H: f32 = 26.0;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Hit {
+    Uhr,
     Cpu,
     Ram,
     Disk(usize),
@@ -45,6 +46,7 @@ pub struct Host {
     stop: Arc<AtomicBool>,
     seen: u32,
     hist: VecDeque<f32>,
+    zeit: VecDeque<u32>,
 }
 
 impl Host {
@@ -61,6 +63,7 @@ pub struct App {
     pub hosts: Vec<Host>,
     pub stats: Stats,
     computer: String,
+    pub font: HFONT,
     small_font: HFONT,
     /// aktiver Energieplan (GUID), bekannte Plan-Namen und erkanntes Spiel
     pub plan: Option<String>,
@@ -69,13 +72,16 @@ pub struct App {
     game_prev: bool,
     pub hover: Option<Hit>,
     hits: Vec<(i32, i32, Hit)>,
+    /// Mausposition im Fenster und Flaechen der Graphen aus dem letzten Bild
+    cursor: Option<(i32, i32)>,
+    graphs: Vec<RECT>,
     pub tracking: bool,
     pub ignore_up: bool,
     pub drag: Option<(POINT, POINT)>,
     pub dragging: bool,
     visible: bool,
     pub user_hidden: bool,
-    scale: f32,
+    pub scale: f32,
     size: (i32, i32),
     text: Surface,
     out: Surface,
@@ -86,6 +92,7 @@ struct Frame {
     ops: Vec<TextOp>,
     dr: Vec<Draw>,
     hits: Vec<(i32, i32, Hit)>,
+    graphs: Vec<RECT>,
     y: i32,
     w: i32,
     pad: i32,
@@ -105,6 +112,10 @@ pub fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
 
 pub fn install(app: App) {
     APP.with(|a| *a.borrow_mut() = Some(app));
+}
+
+fn innen(r: &RECT, x: i32, y: i32) -> bool {
+    x >= r.left && x < r.right && y >= r.top && y < r.bottom
 }
 
 fn mtime(p: &PathBuf) -> Option<SystemTime> {
@@ -159,6 +170,7 @@ impl App {
             hosts: Vec::new(),
             stats: Stats::new(),
             computer: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into()),
+            font,
             small_font,
             plan: None,
             plan_names: Vec::new(),
@@ -166,6 +178,8 @@ impl App {
             game_prev: false,
             hover: None,
             hits: Vec::new(),
+            cursor: None,
+            graphs: Vec::new(),
             tracking: false,
             ignore_up: false,
             drag: None,
@@ -185,6 +199,36 @@ impl App {
 
     pub fn hit_at(&self, y: i32) -> Option<Hit> {
         self.hits.iter().find(|(a, b, _)| y >= *a && y < *b).map(|h| h.2)
+    }
+
+    /// Maus bewegt: neu zeichnen, wenn sich das Element oder der Punkt im Graphen geaendert hat.
+    pub fn mouse_at(&mut self, pos: Option<(i32, i32)>) {
+        let key = |a: &App, p: Option<(i32, i32)>| {
+            let (x, y) = p?;
+            a.graphs.iter().find(|r| innen(r, x, y)).map(|r| (r.top, x))
+        };
+        let changed = key(self, pos) != key(self, self.cursor);
+        self.cursor = pos;
+        let hit = pos.and_then(|p| self.hit_at(p.1));
+        if changed || hit != self.hover {
+            self.hover = hit;
+            self.render();
+        }
+    }
+
+    /// Index des Verlaufswerts unter der Maus; None, wenn die Maus nicht ueber diesem Graphen steht oder dort noch nichts gemessen wurde.
+    fn punkt(&self, r: &RECT, len: usize) -> Option<usize> {
+        let (x, _) = self.cursor.filter(|&(x, y)| innen(r, x, y))?;
+        let back = (r.right - 1 - x) as usize;
+        (back < len).then(|| len - 1 - back)
+    }
+
+    /// Merkt die Graph-Flaeche und zeichnet die senkrechte Marke am gewaehlten Punkt.
+    fn marke(&self, f: &mut Frame, r: RECT, p: Option<usize>) {
+        f.graphs.push(r);
+        if let (Some(_), Some((x, _))) = (p, self.cursor) {
+            f.dr.push(Draw::Fill(rect(x, r.top, x + self.px(1.0).max(1), r.bottom), 0xFFFFFF, 0.9));
+        }
     }
 
     fn level(&self, pct: f32) -> u32 {
@@ -219,8 +263,8 @@ impl App {
         for cfg in cfgs {
             // Verlauf und letzten Wert gleicher Hosts uebernehmen
             let prev = old.iter().position(|h| h.cfg.addr == cfg.addr && h.cfg.name == cfg.name).map(|i| old.remove(i));
-            let (hist, last) = prev.map_or((VecDeque::new(), (Status::Pending, 0)), |h| (h.hist, *h.status.lock().unwrap()));
-            let host = Host { cfg, status: Arc::new(Mutex::new((last.0, 0))), stop: Arc::new(AtomicBool::new(false)), seen: 0, hist };
+            let (hist, zeit, last) = prev.map_or((VecDeque::new(), VecDeque::new(), (Status::Pending, 0)), |h| (h.hist, h.zeit, *h.status.lock().unwrap()));
+            let host = Host { cfg, status: Arc::new(Mutex::new((last.0, 0))), stop: Arc::new(AtomicBool::new(false)), seen: 0, hist, zeit };
             spawn_pinger(host.cfg.addr.clone(), &settings, host.status.clone(), host.stop.clone(), self.hwnd as usize);
             self.hosts.push(host);
         }
@@ -375,6 +419,7 @@ impl App {
             if seq != h.seen {
                 h.seen = seq;
                 push_hist(&mut h.hist, if let Status::Ok(ms) = s { ms as f32 } else { max });
+                push_hist(&mut h.zeit, jetzt());
             }
         }
         self.render();
@@ -435,6 +480,7 @@ impl App {
         let kw = iso_week(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
         let d = format!("{} {:02}.{:02}.{}  KW{}", WOCHENTAG[t.wDayOfWeek as usize % 7], t.wDay, t.wMonth, t.wYear, kw);
         self.put(f, &d, f.pad, false, f.inner - tw - f.gap, self.settings.dim);
+        f.hits.push((f.y, f.y + f.rh, Hit::Uhr));
         f.y += f.rh;
     }
 
@@ -461,17 +507,27 @@ impl App {
         let (y0, st) = (f.y, &self.stats);
         // Prozent in fester Spalte (Breite von "100%"), damit GHz nicht hin und her springt
         let pcol = self.measure("100%");
-        self.put(f, &format!("{:.0}%", st.cpu), f.w - f.pad, true, f.inner, self.level(st.cpu));
-        let gw = if st.ghz > 0.0 {
-            self.put(f, &format!("{:.1} GHz", st.ghz), f.w - f.pad - pcol - f.gap, true, f.inner, self.settings.accent) + f.gap
-        } else {
-            0
-        };
-        let lw = self.put(f, "CPU", f.pad, false, f.inner, self.settings.fg);
-        self.put(f, &st.cpu_name, f.pad + lw + f.gap, false, f.inner - lw - pcol - gw - 2 * f.gap, self.settings.dim);
-        f.y += f.rh;
         let sh = self.px(SPARK_H);
-        f.dr.push(Draw::Spark(rect(f.pad, f.y, f.w - f.pad, f.y + sh), st.cpu_hist.iter().copied().collect(), self.settings.fg));
+        let gr = rect(f.pad, f.y + f.rh, f.w - f.pad, f.y + f.rh + sh);
+        let p = self.punkt(&gr, st.cpu_hist.len());
+        if let Some(i) = p {
+            let v = st.cpu_hist[i] * 100.0;
+            self.put(f, &format!("{v:.0}%"), f.w - f.pad, true, f.inner, self.level(v));
+            let lw = self.put(f, "CPU", f.pad, false, f.inner, self.settings.fg);
+            self.put(f, &hms(st.zeit_hist[i]), f.pad + lw + f.gap, false, f.inner - lw - pcol - 2 * f.gap, self.settings.accent);
+        } else {
+            self.put(f, &format!("{:.0}%", st.cpu), f.w - f.pad, true, f.inner, self.level(st.cpu));
+            let gw = if st.ghz > 0.0 {
+                self.put(f, &format!("{:.1} GHz", st.ghz), f.w - f.pad - pcol - f.gap, true, f.inner, self.settings.accent) + f.gap
+            } else {
+                0
+            };
+            let lw = self.put(f, "CPU", f.pad, false, f.inner, self.settings.fg);
+            self.put(f, &st.cpu_name, f.pad + lw + f.gap, false, f.inner - lw - pcol - gw - 2 * f.gap, self.settings.dim);
+        }
+        f.y += f.rh;
+        f.dr.push(Draw::Spark(gr, st.cpu_hist.iter().copied().collect(), self.settings.fg));
+        self.marke(f, gr, p);
         f.y += sh + self.px(3.0);
         f.hits.push((y0, f.y, Hit::Cpu));
     }
@@ -514,12 +570,18 @@ impl App {
 
     fn el_netz(&self, f: &mut Frame) {
         let (y0, st) = (f.y, &self.stats);
-        let uw = self.put(f, &format!("\u{2191} {}", rate(st.up)), f.w - f.pad, true, f.inner, self.settings.accent);
-        self.put(f, &format!("\u{2193} {}", rate(st.down)), f.pad, false, f.inner - uw - f.gap, self.settings.accent);
-        f.y += f.rh;
         let nh = self.px(NET_SPARK_H);
+        let gr = rect(f.pad, f.y + f.rh, f.w - f.pad, f.y + f.rh + nh);
+        let p = self.punkt(&gr, st.net_hist.len());
+        // Mit Maus auf dem Graphen: Uhrzeit und die Werte dieser Messung
+        let (down, up, zeit) = p.map_or((st.down, st.up, None), |i| (st.net_hist[i] as f64, st.up_hist[i] as f64, Some(st.zeit_hist[i])));
+        let uw = self.put(f, &format!("\u{2191} {}", rate(up)), f.w - f.pad, true, f.inner, self.settings.accent);
+        let zw = zeit.map_or(0, |z| self.put(f, &hms(z), f.pad, false, f.inner, self.settings.fg) + f.gap);
+        self.put(f, &format!("\u{2193} {}", rate(down)), f.pad + zw, false, f.inner - uw - zw - f.gap, self.settings.accent);
+        f.y += f.rh;
         let max = st.net_hist.iter().fold(1024.0f32, |m, &v| m.max(v));
-        f.dr.push(Draw::Spark(rect(f.pad, f.y, f.w - f.pad, f.y + nh), st.net_hist.iter().map(|v| v / max).collect(), self.settings.accent));
+        f.dr.push(Draw::Spark(gr, st.net_hist.iter().map(|v| v / max).collect(), self.settings.accent));
+        self.marke(f, gr, p);
         f.y += nh + self.px(3.0);
         f.hits.push((y0, f.y, Hit::Net));
     }
@@ -541,15 +603,29 @@ impl App {
                 Status::Ok(ms) => format!("{ms} ms"),
                 Status::Timeout => "TIMED OUT".to_string(),
             };
+            // Graph UNTER der Zeile, damit sich darueber nichts verschiebt
+            let gh = self.px(GRAPH_H);
+            let gr = rect(f.pad, f.y + f.rh + 1, f.w - f.pad, f.y + f.rh + 1 + gh);
+            let p = if host.cfg.graph { self.punkt(&gr, host.hist.len()) } else { None };
+            // Mit Maus auf dem Graphen: Uhrzeit und Wert dieser Messung (ein Timeout steht als graph_max im Verlauf)
+            let (val, col) = p.map_or((val, col), |k| {
+                let v = host.hist[k];
+                match v as u32 {
+                    _ if v == gmax => ("TIMED OUT".to_string(), COL_RED),
+                    ms if ms < host.cfg.yellow => (format!("{ms} ms"), self.settings.fg),
+                    ms if ms < host.cfg.red => (format!("{ms} ms"), COL_YELLOW),
+                    ms => (format!("{ms} ms"), COL_RED),
+                }
+            });
             let vw = self.put(f, &val, f.w - f.pad - dotw, true, f.inner, col);
-            let name = if self.hover == Some(Hit::Ping(i)) { &host.cfg.addr } else { &host.cfg.name };
+            let zeit = p.map(|k| hms(host.zeit[k]));
+            let name = zeit.as_ref().unwrap_or(if self.hover == Some(Hit::Ping(i)) { &host.cfg.addr } else { &host.cfg.name });
             self.put(f, name, f.pad, false, f.inner - dotw - vw - f.gap, self.settings.fg);
             f.dr.push(Draw::Dot((f.w - f.pad) as f32 - DOT_R * self.scale - 1.0, f.y as f32 + f.rh as f32 / 2.0, col));
             f.y += f.rh;
             if host.cfg.graph {
-                // Graph UNTER der Zeile, damit sich darueber nichts verschiebt
-                let gh = self.px(GRAPH_H);
-                f.dr.push(Draw::Line(rect(f.pad, f.y + 1, f.w - f.pad, f.y + 1 + gh), host.hist.iter().map(|v| v / gmax).collect(), self.settings.accent));
+                f.dr.push(Draw::Line(gr, host.hist.iter().map(|v| v / gmax).collect(), self.settings.accent));
+                self.marke(f, gr, p);
                 f.y += gh + self.px(3.0);
             }
             f.hits.push((yh, f.y, Hit::Ping(i)));
@@ -566,7 +642,7 @@ impl App {
         }
         let w = self.px(self.settings.width);
         let pad = self.px(PAD);
-        let mut f = Frame { ops: Vec::new(), dr: Vec::new(), hits: Vec::new(), y: self.px(3.0), w, pad, gap: self.px(GAP), rh: self.px(ROW_H), inner: w - 2 * pad };
+        let mut f = Frame { ops: Vec::new(), dr: Vec::new(), hits: Vec::new(), graphs: Vec::new(), y: self.px(3.0), w, pad, gap: self.px(GAP), rh: self.px(ROW_H), inner: w - 2 * pad };
 
         for (mi, m) in self.settings.modules.iter().enumerate() {
             if mi > 0 {
@@ -614,6 +690,7 @@ impl App {
             UpdateLayeredWindow(self.hwnd, null_mut(), &pos, &size, self.out.dc, &src, 0, &bf, ULW_ALPHA);
         }
         self.hits = f.hits;
+        self.graphs = f.graphs;
     }
 }
 

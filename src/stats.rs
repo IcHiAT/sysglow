@@ -11,7 +11,7 @@ use windows_sys::Win32::NetworkManagement::IpHelper::*;
 use windows_sys::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives};
 use windows_sys::Win32::System::Performance::*;
 use windows_sys::Win32::System::Registry::*;
-use windows_sys::Win32::System::SystemInformation::{GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
+use windows_sys::Win32::System::SystemInformation::{GetLocalTime, GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::GetSystemTimes;
 
 use crate::wide;
@@ -30,6 +30,8 @@ pub struct Stats {
     cpu_prev: Option<(u64, u64)>,
     pub cpu: f32,
     pub cpu_hist: VecDeque<f32>,
+    /// Uhrzeit jeder Messung (Sekunden seit Mitternacht), parallel zu cpu_hist und den Netz-Verlaeufen
+    pub zeit_hist: VecDeque<u32>,
     base_mhz: f64,
     perf: Option<(isize, isize)>,
     pub ghz: f32,
@@ -41,14 +43,29 @@ pub struct Stats {
     pub down: f64,
     pub up: f64,
     pub net_hist: VecDeque<f32>,
+    pub up_hist: VecDeque<f32>,
     pub uptime: u64,
 }
 
-pub fn push_hist(h: &mut VecDeque<f32>, v: f32) {
+pub fn push_hist<T>(h: &mut VecDeque<T>, v: T) {
     h.push_back(v);
     while h.len() > HIST_MAX {
         h.pop_front();
     }
+}
+
+/// Aktuelle Ortszeit in Sekunden seit Mitternacht.
+pub fn jetzt() -> u32 {
+    let t = unsafe {
+        let mut t = zeroed::<SYSTEMTIME>();
+        GetLocalTime(&mut t);
+        t
+    };
+    t.wHour as u32 * 3600 + t.wMinute as u32 * 60 + t.wSecond as u32
+}
+
+pub fn hms(s: u32) -> String {
+    format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
 }
 
 fn ft(f: &FILETIME) -> u64 {
@@ -184,6 +201,7 @@ impl Stats {
             cpu_prev: None,
             cpu: 0.0,
             cpu_hist: VecDeque::new(),
+            zeit_hist: VecDeque::new(),
             base_mhz: base_mhz(),
             perf: open_perf(),
             ghz: 0.0,
@@ -195,6 +213,7 @@ impl Stats {
             down: 0.0,
             up: 0.0,
             net_hist: VecDeque::new(),
+            up_hist: VecDeque::new(),
             uptime: 0,
         }
     }
@@ -227,6 +246,7 @@ impl Stats {
             self.uptime = GetTickCount64() / 1000;
         }
         push_hist(&mut self.cpu_hist, self.cpu / 100.0);
+        push_hist(&mut self.zeit_hist, jetzt());
         if self.disk_at.elapsed() >= Duration::from_secs(10) {
             self.disk_at = Instant::now();
             self.disks = read_disks();
@@ -241,6 +261,7 @@ impl Stats {
             self.net_prev = Some((rx, tx, now));
         }
         push_hist(&mut self.net_hist, self.down as f32);
+        push_hist(&mut self.up_hist, self.up as f32);
     }
 }
 
