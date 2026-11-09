@@ -15,6 +15,7 @@
 mod app;
 mod config;
 mod gfx;
+mod installer;
 mod kalender;
 mod ping;
 mod power;
@@ -396,13 +397,16 @@ fn main() {
         if std::env::args().any(|a| a == "--restart") {
             std::thread::sleep(Duration::from_secs(3)); // Explorer Zeit zum Starten geben
         }
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
+        let scale = GetDpiForSystem() as f32 / 96.0;
+        if installer::soll_fenster() && !installer::zeigen(scale) {
+            return;
+        }
         // nur eine Instanz
         CreateMutexW(null(), 0, wide("Local\\Sysglow.SingleInstance").as_ptr());
         if GetLastError() == ERROR_ALREADY_EXISTS {
             return;
         }
-        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
-        let scale = GetDpiForSystem() as f32 / 96.0;
 
         let inst = GetModuleHandleW(null());
         let class = wide("SysglowWnd");

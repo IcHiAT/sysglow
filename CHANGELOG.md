@@ -1,5 +1,10 @@
 # Changelog
 
+## Unveröffentlicht
+
+- Neu: `Sysglow.exe` bringt das Installationsfenster selbst mit. Wer die exe aus dem Download startet, bekommt INSTALL und START, bei vorhandener Installation UNINSTALL und INSTALL. PowerShell ist dafür nicht mehr nötig.
+- Geändert: Liegt eine `sysglow.ini` neben der exe, startet sie weiter direkt als Widget.
+
 ## 0.5.0 (09.11.2026)
 
 - Neu: `werkzeug\installieren.ps1` installiert ohne Administratorrechte nach `%LOCALAPPDATA%\Programs\Sysglow`, mit Startmenü-Eintrag. Mit `-AlleBenutzer` geht es nach `C:\Program Files\Sysglow`.

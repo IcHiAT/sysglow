@@ -38,15 +38,17 @@ Klick auf das Datum öffnet den Kalender:
 
 ## Installation
 
-1. `Sysglow.exe` von der [Release-Seite](https://github.com/IcHiAT/sysglow/releases/latest) laden und in einen eigenen Ordner legen, z. B. `%LOCALAPPDATA%\Programs\Sysglow\`.
-2. Starten – beim ersten Start entsteht `sysglow.ini` daneben. Die exe ist nicht signiert, deshalb kann Windows SmartScreen beim ersten Start warnen („Weitere Informationen“ → „Trotzdem ausführen“).
-3. Rechtsklick → *Mit Windows starten* für Autostart, *Im Startmenü anzeigen* für den Eintrag im Startmenü.
+1. `Sysglow.exe` von der [Release-Seite](https://github.com/IcHiAT/sysglow/releases/latest) laden und starten. Die exe ist nicht signiert, deshalb kann Windows SmartScreen beim ersten Start warnen („Weitere Informationen“ → „Trotzdem ausführen“).
+2. Im kleinen Fenster **INSTALL** klicken. Sysglow landet ohne Administratorrechte in `%LOCALAPPDATA%\Programs\Sysglow\` und bekommt einen Startmenü-Eintrag. **START** lässt es ohne Installation laufen. Ist Sysglow schon installiert, bietet das Fenster **UNINSTALL** und **INSTALL** an; die `sysglow.ini` bleibt in beiden Fällen erhalten.
+3. Rechtsklick auf das Widget → *Mit Windows starten* für Autostart.
+
+Liegt eine `sysglow.ini` neben der exe, startet sie direkt als Widget, ohne Fenster.
 
 Läuft unter Windows 10/11. Die Benutzung erfolgt auf eigene Gefahr.
 
-### Installieren ohne Administratorrechte
+### Installieren per Skript
 
-Am einfachsten per Doppelklick auf `werkzeug\Installer.cmd`: Es öffnet sich ein kleines Fenster mit einem Install-Knopf. Oder in einer normalen PowerShell im Ordner des Repos starten:
+In einer normalen PowerShell im Ordner des Repos starten:
 
 ```powershell
 .\werkzeug\installieren.ps1
@@ -98,6 +100,7 @@ Ergebnis: `target\release\sysglow.exe`.
 | Datei | Inhalt |
 |---|---|
 | `src/main.rs` | Fenster, Maus, Menü, Tray, Autostart |
+| `src/installer.rs` | Installationsfenster, Installieren und Entfernen |
 | `src/app.rs` | Zustand und je eine Funktion pro Element (`el_kopf`, `el_cpu`, …) |
 | `src/config.rs` | ini lesen, Standardwerte, Elemente an/aus |
 | `src/stats.rs` | Systemwerte (CPU, Takt, RAM, Platten, Netz) |

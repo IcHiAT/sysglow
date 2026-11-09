@@ -18,7 +18,7 @@ pub fn ini_pfad() -> PathBuf {
     exe.with_file_name("sysglow.ini")
 }
 
-fn in_programme(exe: &Path) -> bool {
+pub fn in_programme(exe: &Path) -> bool {
     let klein = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
     let exe = klein(exe);
     ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]

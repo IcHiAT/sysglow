@@ -2,7 +2,7 @@
 //! Der Haken zeigt, ob die Datei existiert; einen gespeicherten Zustand gibt es nicht.
 
 use std::ffi::c_void;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use windows_sys::core::GUID;
 use windows_sys::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
@@ -18,12 +18,16 @@ const SET_WORKING_DIRECTORY: usize = 9;
 const SET_ICON_LOCATION: usize = 17;
 const SET_PATH: usize = 20;
 const SAVE: usize = 6;
+const LOAD: usize = 5;
+const GET_PATH: usize = 3;
 
 type Text = unsafe extern "system" fn(*mut c_void, *const u16) -> i32;
 type Icon = unsafe extern "system" fn(*mut c_void, *const u16, i32) -> i32;
 type Abfrage = unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32;
 type Freigabe = unsafe extern "system" fn(*mut c_void) -> u32;
 type Speichern = unsafe extern "system" fn(*mut c_void, *const u16, i32) -> i32;
+type Laden = unsafe extern "system" fn(*mut c_void, *const u16, u32) -> i32;
+type PfadLesen = unsafe extern "system" fn(*mut c_void, *mut u16, i32, *mut c_void, u32) -> i32;
 
 fn w(s: &std::ffi::OsStr) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
@@ -50,12 +54,46 @@ pub fn setzen(name: &str, an: bool) {
         let _ = std::fs::remove_file(lnk);
         return;
     }
-    let Ok(exe) = std::env::current_exe() else { return };
+    if let Ok(exe) = std::env::current_exe() {
+        setzen_auf(name, &exe);
+    }
+}
+
+/// Worauf die Verknüpfung zeigt, oder None, wenn es keine gibt.
+pub fn ziel_von(name: &str) -> Option<PathBuf> {
+    let lnk = pfad(name).filter(|p| p.exists())?;
+    let datei = w(lnk.as_os_str());
+    let mut puffer = [0u16; 1024];
+    let mut gelesen = false;
+    unsafe {
+        let init = CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED as u32);
+        let mut link: *mut c_void = null_mut();
+        if CoCreateInstance(&CLSID_SHELL_LINK, null_mut(), CLSCTX_INPROC_SERVER, &IID_ISHELL_LINK_W, &mut link) >= 0 {
+            let mut persist: *mut c_void = null_mut();
+            if methode::<Abfrage>(link, QUERY_INTERFACE)(link, &IID_IPERSIST_FILE, &mut persist) >= 0 {
+                if methode::<Laden>(persist, LOAD)(persist, datei.as_ptr(), 0) >= 0 {
+                    gelesen = methode::<PfadLesen>(link, GET_PATH)(link, puffer.as_mut_ptr(), puffer.len() as i32, null_mut(), 0) >= 0;
+                }
+                methode::<Freigabe>(persist, RELEASE)(persist);
+            }
+            methode::<Freigabe>(link, RELEASE)(link);
+        }
+        if init >= 0 {
+            CoUninitialize();
+        }
+    }
+    let ende = puffer.iter().position(|&z| z == 0)?;
+    (gelesen && ende > 0).then(|| PathBuf::from(String::from_utf16_lossy(&puffer[..ende])))
+}
+
+/// Legt die Verknüpfung auf eine bestimmte exe an (der Installer zeigt nicht auf sich selbst).
+pub fn setzen_auf(name: &str, exe: &Path) {
+    let Some(lnk) = pfad(name) else { return };
     if let Some(ordner) = lnk.parent() {
         let _ = std::fs::create_dir_all(ordner);
     }
     let ziel = w(exe.as_os_str());
-    let ordner = w(exe.parent().unwrap_or(&exe).as_os_str());
+    let ordner = w(exe.parent().unwrap_or(exe).as_os_str());
     let datei = w(lnk.as_os_str());
     unsafe {
         let init = CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED as u32);
