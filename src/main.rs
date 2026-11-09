@@ -43,7 +43,6 @@ use ping::WM_PING;
 
 const FONT_NAME: &str = "Consolas";
 const FONT_PT: f32 = 9.0;
-const SMALL_FONT_PT: f32 = 7.5;
 
 const WM_TRAY: u32 = WM_APP + 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -454,10 +453,9 @@ fn main() {
             wide(FONT_NAME).as_ptr(),
         );
         let font = make_font(FONT_PT);
-        let small_font = make_font(SMALL_FONT_PT);
 
         let cfg_path = config::ini_pfad();
-        let mut app = App::new(hwnd, scale, font, small_font, cfg_path);
+        let mut app = App::new(hwnd, scale, font, cfg_path);
         app.load_config(); // startet auch den Mess-Timer
         app.stats.sample();
         app.update_visibility();

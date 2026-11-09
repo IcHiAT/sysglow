@@ -64,7 +64,6 @@ pub struct App {
     pub stats: Stats,
     computer: String,
     pub font: HFONT,
-    small_font: HFONT,
     /// aktiver Energieplan (GUID), bekannte Plan-Namen und erkanntes Spiel
     pub plan: Option<String>,
     plan_names: Vec<(String, String)>,
@@ -161,7 +160,7 @@ pub fn iso_week(y: i32, m: u32, d: u32) -> u32 {
 }
 
 impl App {
-    pub unsafe fn new(hwnd: HWND, scale: f32, font: HFONT, small_font: HFONT, cfg_path: PathBuf) -> App {
+    pub unsafe fn new(hwnd: HWND, scale: f32, font: HFONT, cfg_path: PathBuf) -> App {
         App {
             hwnd,
             cfg_path,
@@ -171,7 +170,6 @@ impl App {
             stats: Stats::new(),
             computer: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into()),
             font,
-            small_font,
             plan: None,
             plan_names: Vec::new(),
             game: None,
@@ -464,9 +462,8 @@ impl App {
         let up = self.stats.uptime;
         let (d, hh, mm) = (up / 86400, up / 3600 % 24, up / 60 % 60);
         let ut = if d > 0 { format!("up {d}d {hh:02}:{mm:02}") } else { format!("up {hh:02}:{mm:02}") };
-        let sf = self.small_font;
-        let uw = self.put_font(f, &ut, f.w - f.pad, true, f.inner, self.settings.dim, sf);
-        self.put_font(f, &self.computer, f.pad, false, f.inner - uw - f.gap, self.settings.accent, sf);
+        let uw = self.put(f, &ut, f.w - f.pad, true, f.inner, self.settings.dim);
+        self.put(f, &self.computer, f.pad, false, f.inner - uw - f.gap, self.settings.accent);
         f.y += f.rh;
     }
 
