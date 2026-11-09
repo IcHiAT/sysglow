@@ -44,15 +44,15 @@ Klick auf das Datum öffnet den Kalender:
 
 Läuft unter Windows 10/11. Die Benutzung erfolgt auf eigene Gefahr.
 
-### Nach `C:\Program Files` installieren
+### Installieren ohne Administratorrechte
 
-In einer PowerShell im Ordner des Repos starten. Windows fragt einmal nach Administratorrechten, weil nur Administratoren in den Programme-Ordner schreiben dürfen. Sysglow selbst läuft danach ohne:
+In einer normalen PowerShell im Ordner des Repos starten:
 
 ```powershell
 .\werkzeug\installieren.ps1
 ```
 
-Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach `C:\Program Files\Sysglow\` und richtet einen Startmenü-Eintrag für alle Benutzer ein. Ein erneuter Aufruf aktualisiert, `-Entfernen` deinstalliert. Liegt die exe unter `C:\Program Files`, steht die `sysglow.ini` in `%APPDATA%\Sysglow\`, sonst weiter neben der exe. Wer aus einem anderen Ordner umzieht, kopiert seine alte `sysglow.ini` selbst dorthin, sonst startet Sysglow mit den Standardwerten. `-Entfernen` löscht auch den Autostart und die eigene Startmenü-Verknüpfung des Kontos, das das Skript startet.
+Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach `%LOCALAPPDATA%\Programs\Sysglow\`, richtet einen Startmenü-Eintrag ein und startet Sysglow. Es erscheint keine Windows-Abfrage. Ein erneuter Aufruf aktualisiert, `-Entfernen` deinstalliert, dazu zählen auch Autostart und Startmenü-Eintrag; die `sysglow.ini` bleibt erhalten. Mit `-AlleBenutzer` geht es stattdessen nach `C:\Program Files\Sysglow`, dafür fragt Windows einmal nach Administratorrechten, und die `sysglow.ini` steht dann in `%APPDATA%\Sysglow\`.
 
 ## Konfiguration (`sysglow.ini`)
 
