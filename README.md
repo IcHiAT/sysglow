@@ -46,7 +46,7 @@ Läuft unter Windows 10/11. Die Benutzung erfolgt auf eigene Gefahr.
 
 ### Nach `C:\Program Files` installieren
 
-Aus einer PowerShell mit Administratorrechten, im Ordner des Repos:
+In einer PowerShell im Ordner des Repos starten. Windows fragt einmal nach Administratorrechten, weil nur Administratoren in den Programme-Ordner schreiben dürfen. Sysglow selbst läuft danach ohne:
 
 ```powershell
 .\werkzeug\installieren.ps1

@@ -1,6 +1,7 @@
 <#
 Sysglow nach C:\Program Files\Sysglow installieren, aktualisieren oder entfernen.
-Braucht eine PowerShell mit Administratorrechten.
+Fragt beim Start per Windows-Abfrage nach Administratorrechten. Die braucht nur das Kopieren,
+Sysglow selbst laeuft danach ohne.
 
 Parameter:
   -Entfernen   Programmordner und Startmenue-Eintrag loeschen, dazu Autostart und eigene Verknuepfung
@@ -10,6 +11,7 @@ Parameter:
 Changelog:
 09.11.2026 08:44 - erstellt
 09.11.2026 20:59 - -Entfernen raeumt Autostart und eigene Startmenue-Verknuepfung mit auf
+09.11.2026 21:02 - fragt selbst nach Administratorrechten
 #>
 param([switch]$Entfernen)
 
@@ -22,7 +24,12 @@ Write-Host 'Parameter: -Entfernen = deinstallieren, ohne = installieren oder akt
 $rolle = [Security.Principal.WindowsBuiltInRole]::Administrator
 $ich = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $ich.IsInRole($rolle)) {
-    throw 'Bitte PowerShell als Administrator starten.'
+    Write-Host 'Zum Kopieren in den Programme-Ordner fragt Windows jetzt nach Administratorrechten.'
+    $argumente = @('-NoProfile', '-NoExit', '-ExecutionPolicy', (Get-ExecutionPolicy).ToString(), '-File', "`"$PSCommandPath`"")
+    if ($Entfernen) { $argumente += '-Entfernen' }
+    try { Start-Process powershell -Verb RunAs -ArgumentList $argumente }
+    catch { throw 'Administratorrechte abgelehnt, nichts geaendert.' }
+    return
 }
 
 $ordner = Join-Path $env:ProgramFiles 'Sysglow'

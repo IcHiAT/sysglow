@@ -4,6 +4,7 @@
 
 - Neu: `werkzeug\installieren.ps1` installiert nach `C:\Program Files\Sysglow` mit Startmenü-Eintrag für alle Benutzer.
 - Geändert: Liegt die exe unter `C:\Program Files`, steht die `sysglow.ini` in `%APPDATA%\Sysglow`.
+- Geändert: `installieren.ps1` fragt selbst nach Administratorrechten, eine Admin-PowerShell ist nicht mehr nötig.
 - Neu: `installieren.ps1 -Entfernen` räumt auch Autostart und eigene Startmenü-Verknüpfung auf.
 - Behoben: Bei Hybrid-CPUs mit P- und E-Kernen zeigte der Takt zu hohe Werte (z. B. 7,7 GHz). Die Basis kommt jetzt aus dem Leistungsindikator „Processor Frequency“ statt aus der Registry.
 
