@@ -4,6 +4,7 @@
 
 - Neu: `werkzeug\installieren.ps1` installiert nach `C:\Program Files\Sysglow` mit Startmenü-Eintrag für alle Benutzer.
 - Geändert: Liegt die exe unter `C:\Program Files`, steht die `sysglow.ini` in `%APPDATA%\Sysglow`.
+- Behoben: Bei Hybrid-CPUs mit P- und E-Kernen zeigte der Takt zu hohe Werte (z. B. 7,7 GHz). Die Basis kommt jetzt aus dem Leistungsindikator „Processor Frequency“ statt aus der Registry.
 
 ## 0.4.0 (08.11.2026)
 

@@ -32,8 +32,7 @@ pub struct Stats {
     pub cpu_hist: VecDeque<f32>,
     /// Uhrzeit jeder Messung (Sekunden seit Mitternacht), parallel zu cpu_hist und den Netz-Verlaeufen
     pub zeit_hist: VecDeque<u32>,
-    base_mhz: f64,
-    perf: Option<(isize, isize)>,
+    perf: Option<(isize, isize, isize)>,
     pub ghz: f32,
     pub mem_total: f64,
     pub mem_avail: f64,
@@ -111,43 +110,25 @@ fn cpu_name() -> String {
     short_cpu(&String::from_utf16_lossy(&buf[..(len as usize / 2).saturating_sub(1)]))
 }
 
-/// Nenntakt in MHz aus der Registry (Basis fuer die Takt-Berechnung).
-fn base_mhz() -> f64 {
-    let mut v = 0u32;
-    let mut len = 4u32;
-    let ok = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            wide(CPU_KEY).as_ptr(),
-            wide("~MHz").as_ptr(),
-            RRF_RT_REG_DWORD,
-            null_mut(),
-            &mut v as *mut u32 as *mut c_void,
-            &mut len,
-        )
-    } == ERROR_SUCCESS;
-    if ok {
-        v as f64
-    } else {
-        0.0
-    }
-}
-
-/// Leistungsindikator "% Processor Performance" (wie der Task-Manager): Takt = Nenntakt * Wert / 100.
-fn open_perf() -> Option<(isize, isize)> {
+/// Leistungsindikatoren fuer den Takt: "Processor Frequency" * "% Processor Performance" / 100.
+/// Beide bezogen auf _Total, damit es auch bei Hybrid-CPUs mit P- und E-Kernen stimmt.
+fn open_perf() -> Option<(isize, isize, isize)> {
     unsafe {
         let mut q = 0isize;
         if PdhOpenQueryW(null(), 0, &mut q) != 0 {
             return None;
         }
-        let mut c = 0isize;
-        let path = wide("\\Processor Information(_Total)\\% Processor Performance");
-        if PdhAddEnglishCounterW(q, path.as_ptr(), 0, &mut c) != 0 {
+        let (mut leistung, mut frequenz) = (0isize, 0isize);
+        let pfad_leistung = wide("\\Processor Information(_Total)\\% Processor Performance");
+        let pfad_frequenz = wide("\\Processor Information(_Total)\\Processor Frequency");
+        if PdhAddEnglishCounterW(q, pfad_leistung.as_ptr(), 0, &mut leistung) != 0
+            || PdhAddEnglishCounterW(q, pfad_frequenz.as_ptr(), 0, &mut frequenz) != 0
+        {
             PdhCloseQuery(q);
             return None;
         }
         PdhCollectQueryData(q);
-        Some((q, c))
+        Some((q, leistung, frequenz))
     }
 }
 
@@ -202,7 +183,6 @@ impl Stats {
             cpu: 0.0,
             cpu_hist: VecDeque::new(),
             zeit_hist: VecDeque::new(),
-            base_mhz: base_mhz(),
             perf: open_perf(),
             ghz: 0.0,
             mem_total: 0.0,
@@ -231,10 +211,13 @@ impl Stats {
                 }
                 self.cpu_prev = Some((idle, total));
             }
-            if let Some((q, c)) = self.perf {
-                let mut v: PDH_FMT_COUNTERVALUE = zeroed();
-                if self.base_mhz > 0.0 && PdhCollectQueryData(q) == 0 && PdhGetFormattedCounterValue(c, PDH_FMT_DOUBLE, null_mut(), &mut v) == 0 {
-                    self.ghz = (v.Anonymous.doubleValue * self.base_mhz / 100_000.0) as f32;
+            if let Some((q, leistung, frequenz)) = self.perf {
+                let (mut l, mut f): (PDH_FMT_COUNTERVALUE, PDH_FMT_COUNTERVALUE) = (zeroed(), zeroed());
+                if PdhCollectQueryData(q) == 0
+                    && PdhGetFormattedCounterValue(leistung, PDH_FMT_DOUBLE, null_mut(), &mut l) == 0
+                    && PdhGetFormattedCounterValue(frequenz, PDH_FMT_DOUBLE, null_mut(), &mut f) == 0
+                {
+                    self.ghz = (l.Anonymous.doubleValue * f.Anonymous.doubleValue / 100_000.0) as f32;
                 }
             }
             let mut m: MEMORYSTATUSEX = zeroed();
