@@ -3,11 +3,13 @@ Sysglow nach C:\Program Files\Sysglow installieren, aktualisieren oder entfernen
 Braucht eine PowerShell mit Administratorrechten.
 
 Parameter:
-  -Entfernen   Programmordner und Startmenue-Eintrag loeschen. Die ini in %APPDATA%\Sysglow bleibt.
+  -Entfernen   Programmordner und Startmenue-Eintrag loeschen, dazu Autostart und eigene Verknuepfung
+               des Kontos, das das Skript startet. Die ini in %APPDATA%\Sysglow bleibt.
   (ohne)       Neueste Version von GitHub holen, Pruefsumme kontrollieren, installieren.
 
 Changelog:
 09.11.2026 08:44 - erstellt
+09.11.2026 20:59 - -Entfernen raeumt Autostart und eigene Startmenue-Verknuepfung mit auf
 #>
 param([switch]$Entfernen)
 
@@ -33,8 +35,18 @@ function Stop-Sysglow {
         ForEach-Object { Stop-Process -Id $_.Id -Force; $_.WaitForExit(5000) | Out-Null }
 }
 
+function Remove-BenutzerEintraege([string]$runPfad, [string]$linkPfad) {
+    $run = (Get-ItemProperty $runPfad -Name 'Sysglow' -ErrorAction SilentlyContinue).Sysglow
+    if ($run -and $run.Trim('"') -eq $exe) { Remove-ItemProperty $runPfad -Name 'Sysglow' }
+    if (Test-Path $linkPfad) {
+        $ziel = (New-Object -ComObject WScript.Shell).CreateShortcut($linkPfad).TargetPath
+        if ($ziel -eq $exe) { Remove-Item $linkPfad -Force }
+    }
+}
+
 if ($Entfernen) {
     Stop-Sysglow
+    Remove-BenutzerEintraege 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Sysglow.lnk')
     if (Test-Path $link) { Remove-Item $link -Force }
     if (Test-Path $ordner) { Remove-Item $ordner -Recurse -Force }
     Write-Host 'Sysglow entfernt.'

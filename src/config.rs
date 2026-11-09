@@ -245,3 +245,17 @@ pub fn toggle_module(modules: &[String], m: &str) -> Vec<String> {
     v.insert(at, m.to_string());
     v
 }
+
+#[cfg(test)]
+mod pfad_tests {
+    use super::*;
+
+    #[test]
+    fn programme_nur_echte_unterordner() {
+        let basis = std::env::var("ProgramFiles").unwrap();
+        assert!(in_programme(Path::new(&format!("{basis}\\Sysglow\\Sysglow.exe"))));
+        assert!(in_programme(Path::new(&format!("{}\\Sysglow\\Sysglow.exe", basis.to_uppercase()))));
+        assert!(!in_programme(Path::new(&format!("{basis} Extra\\Sysglow.exe"))));
+        assert!(!in_programme(Path::new("C:\\Users\\x\\AppData\\Local\\Programs\\Sysglow\\Sysglow.exe")));
+    }
+}

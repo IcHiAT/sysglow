@@ -52,7 +52,7 @@ Aus einer PowerShell mit Administratorrechten, im Ordner des Repos:
 .\werkzeug\installieren.ps1
 ```
 
-Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach `C:\Program Files\Sysglow\` und richtet einen Startmenü-Eintrag für alle Benutzer ein. Ein erneuter Aufruf aktualisiert, `-Entfernen` deinstalliert. Liegt die exe unter `C:\Program Files`, steht die `sysglow.ini` in `%APPDATA%\Sysglow\`, sonst weiter neben der exe.
+Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach `C:\Program Files\Sysglow\` und richtet einen Startmenü-Eintrag für alle Benutzer ein. Ein erneuter Aufruf aktualisiert, `-Entfernen` deinstalliert. Liegt die exe unter `C:\Program Files`, steht die `sysglow.ini` in `%APPDATA%\Sysglow\`, sonst weiter neben der exe. Wer aus einem anderen Ordner umzieht, kopiert seine alte `sysglow.ini` selbst dorthin, sonst startet Sysglow mit den Standardwerten. `-Entfernen` löscht auch den Autostart und die eigene Startmenü-Verknüpfung des Kontos, das das Skript startet.
 
 ## Konfiguration (`sysglow.ini`)
 
