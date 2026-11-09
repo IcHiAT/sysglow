@@ -1,7 +1,7 @@
 //! Sysglow (kurz: glow) – schlankes Desktop-Widget im Hacker-Stil:
 //! Kopfzeile, Uhr, CPU, RAM, Platten, Netz, Energieplan und Ping-Zeilen. Jedes Element einzeln an/aus.
 //! Schaltet beim Start eines Spiels auf Hoechstleistung und danach zurueck auf Ausbalanciert.
-//! Konfiguration: sysglow.ini neben der exe (wird bei Aenderung automatisch neu geladen).
+//! Konfiguration: sysglow.ini neben der exe, unter "Program Files" in %APPDATA%\Sysglow (wird bei Aenderung automatisch neu geladen).
 //!
 //! Liegt nur auf dem Desktop (unter allen Fenstern) und blendet sich bei Vollbild/Spielen aus.
 //! Maus: ziehen = verschieben, Hover = Details (auf Graphen: Uhrzeit und Wert), Klick auf Datum = Kalender, Klick auf Ping = Graph an/aus,
@@ -456,7 +456,7 @@ fn main() {
         let font = make_font(FONT_PT);
         let small_font = make_font(SMALL_FONT_PT);
 
-        let cfg_path = std::env::current_exe().map(|p| p.with_file_name("sysglow.ini")).unwrap_or_else(|_| "sysglow.ini".into());
+        let cfg_path = config::ini_pfad();
         let mut app = App::new(hwnd, scale, font, small_font, cfg_path);
         app.load_config(); // startet auch den Mess-Timer
         app.stats.sample();

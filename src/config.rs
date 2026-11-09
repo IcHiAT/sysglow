@@ -1,5 +1,32 @@
 //! Konfiguration: sysglow.ini lesen (Einstellungen "key = wert" und Host-Zeilen mit "|").
 
+use std::path::{Path, PathBuf};
+
+/// Pfad der ini: neben der exe, unter "Program Files" aber in %APPDATA%\Sysglow,
+/// weil dort ein normales Konto nicht schreiben darf.
+pub fn ini_pfad() -> PathBuf {
+    let Ok(exe) = std::env::current_exe() else {
+        return "sysglow.ini".into();
+    };
+    if in_programme(&exe) {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let ordner = PathBuf::from(appdata).join("Sysglow");
+            let _ = std::fs::create_dir_all(&ordner);
+            return ordner.join("sysglow.ini");
+        }
+    }
+    exe.with_file_name("sysglow.ini")
+}
+
+fn in_programme(exe: &Path) -> bool {
+    let klein = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
+    let exe = klein(exe);
+    ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .any(|ordner| exe.starts_with(klein(Path::new(&ordner))))
+}
+
 /// Alle Elemente in Standard-Reihenfolge. Jedes kann in der ini oder im Menue einzeln an/aus.
 pub const KNOWN_MODULES: [&str; 8] = ["kopf", "uhr", "cpu", "ram", "platten", "netz", "energie", "ping"];
 

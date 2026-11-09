@@ -44,6 +44,16 @@ Klick auf das Datum öffnet den Kalender:
 
 Läuft unter Windows 10/11. Die Benutzung erfolgt auf eigene Gefahr.
 
+### Nach `C:\Program Files` installieren
+
+Aus einer PowerShell mit Administratorrechten, im Ordner des Repos:
+
+```powershell
+.\werkzeug\installieren.ps1
+```
+
+Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach `C:\Program Files\Sysglow\` und richtet einen Startmenü-Eintrag für alle Benutzer ein. Ein erneuter Aufruf aktualisiert, `-Entfernen` deinstalliert. Liegt die exe unter `C:\Program Files`, steht die `sysglow.ini` in `%APPDATA%\Sysglow\`, sonst weiter neben der exe.
+
 ## Konfiguration (`sysglow.ini`)
 
 | Schlüssel | Bedeutung | Standard |
