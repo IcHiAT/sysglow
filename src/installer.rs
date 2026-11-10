@@ -141,9 +141,10 @@ fn fehlertext(e: &std::io::Error) -> String {
     }
 }
 
-/// Mehrere Versuche, weil Windows eine gerade beendete exe kurz gesperrt haelt.
+/// Mehrere Versuche, weil Windows eine gerade beendete exe kurz gesperrt haelt. Bis zu 8 s, denn der
+/// erhoehte Temperatur-Teil (`--temp`) bemerkt erst nach bis zu 2 s, dass die Anzeige beendet ist.
 fn mit_wiederholung<T>(mut f: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
-    let mut rest = 15;
+    let mut rest = 40;
     loop {
         match f() {
             Err(_) if rest > 0 => {

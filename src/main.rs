@@ -1,5 +1,5 @@
 //! Sysglow (kurz: glow) – schlankes Desktop-Widget im Hacker-Stil:
-//! Kopfzeile, Uhr, CPU, RAM, Platten, Netz, Energieplan und Ping-Zeilen. Jedes Element einzeln an/aus.
+//! Kopfzeile, Uhr, CPU, GPU, RAM, Platten, Netz, Energieplan und Ping-Zeilen. Jedes Element einzeln an/aus.
 //! Schaltet beim Start eines Spiels auf Hoechstleistung und danach zurueck auf Ausbalanciert.
 //! Konfiguration: sysglow.ini neben der exe, unter "Program Files" in %APPDATA%\Sysglow (wird bei Aenderung automatisch neu geladen).
 //!
@@ -7,14 +7,16 @@
 //! Maus: ziehen = verschieben, Hover = Details (auf Graphen: Uhrzeit und Wert), Klick auf Datum = Kalender, Klick auf Ping = Graph an/aus,
 //! Doppelklick = Befehl / Task-Manager / Laufwerk oeffnen, Rechtsklick oder Tray-Icon = Menue.
 //!
-//! Aufbau: config.rs (ini), stats.rs (Systemwerte), ping.rs (ICMP), power.rs (Energieplan, Spiele), gfx.rs (Zeichnen),
+//! Aufbau: config.rs (ini), stats.rs (Systemwerte), gpu.rs (Grafikkarte), ping.rs (ICMP), power.rs (Energieplan, Spiele), gfx.rs (Zeichnen),
 //! app.rs (Zustand + Elemente), main.rs (Fenster, Menue, Tray).
 
 #![windows_subsystem = "windows"]
 
 mod app;
 mod config;
+mod cputemp;
 mod gfx;
+mod gpu;
 mod installer;
 mod kalender;
 mod ping;
@@ -56,6 +58,7 @@ const MENU_LOCK: usize = 6;
 const MENU_RESETPOS: usize = 7;
 const MENU_POWER_AUTO: usize = 8;
 const MENU_STARTMENUE: usize = 9;
+const MENU_CPUTEMP: usize = 10;
 const MENU_COLOR: usize = 200; // + Index in THEMES
 const MENU_MODULE: usize = 100; // + Index in KNOWN_MODULES
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -118,8 +121,9 @@ fn shell_open(cmd: &str) {
 
 // ---------------------------------------------------------------- Menue
 unsafe fn show_menu(hwnd: HWND) {
-    let Some((hidden, locked, modules, power_auto, color)) =
-        with_app(|a| (a.user_hidden, a.settings.locked, a.settings.modules.clone(), a.settings.power_auto, a.settings.color.clone()))
+    let Some((hidden, locked, modules, power_auto, color, gpu_da, temp_an)) = with_app(|a| {
+        (a.user_hidden, a.settings.locked, a.settings.modules.clone(), a.settings.power_auto, a.settings.color.clone(), a.gpu.is_some(), a.cputemp.aktiv())
+    })
     else {
         return;
     };
@@ -133,12 +137,15 @@ unsafe fn show_menu(hwnd: HWND) {
             "uhr" => "Datum und Uhrzeit",
             "energie" => "Energieplan",
             "cpu" => "CPU",
+            "gpu" if !gpu_da => "GPU (nicht erkannt)",
+            "gpu" => "GPU",
             "ram" => "RAM",
             "platten" => "Platten",
             "netz" => "Netz",
             _ => "Ping",
         };
-        AppendMenuW(sub, MF_STRING | check(modules.iter().any(|x| x == m)), MENU_MODULE + i, wide(label).as_ptr());
+        let grau = if *m == "gpu" && !gpu_da { MF_GRAYED } else { 0 };
+        AppendMenuW(sub, MF_STRING | grau | check(modules.iter().any(|x| x == m)), MENU_MODULE + i, wide(label).as_ptr());
     }
     let colors = CreatePopupMenu();
     for (i, t) in THEMES.iter().enumerate() {
@@ -151,6 +158,7 @@ unsafe fn show_menu(hwnd: HWND) {
     AppendMenuW(menu, MF_POPUP, sub as usize, wide("Elemente").as_ptr());
     AppendMenuW(menu, MF_POPUP, colors as usize, wide("Farbe").as_ptr());
     AppendMenuW(menu, MF_STRING | check(power_auto), MENU_POWER_AUTO, wide("Energieplan bei Spielen umschalten").as_ptr());
+    AppendMenuW(menu, MF_STRING | check(temp_an), MENU_CPUTEMP, wide("CPU-Temperatur lesen (einmal Admin)").as_ptr());
     AppendMenuW(menu, MF_STRING | check(locked), MENU_LOCK, wide("Position sperren").as_ptr());
     AppendMenuW(menu, MF_STRING, MENU_RESETPOS, wide("Position zurücksetzen").as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, null());
@@ -198,6 +206,10 @@ unsafe fn show_menu(hwnd: HWND) {
         }
         MENU_AUTOSTART => set_autostart(!auto),
         MENU_STARTMENUE => startmenue::setzen("Sysglow", !im_startmenue),
+        MENU_CPUTEMP => {
+            // eigener Thread: die Admin-Abfrage soll die Anzeige nicht anhalten
+            std::thread::spawn(move || cputemp::einrichten(!temp_an));
+        }
         MENU_POWER_AUTO => {
             with_app(|a| a.set_power_auto(!power_auto));
         }
@@ -338,7 +350,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         sc
                     }
                     Hit::Disk(i) => format!("explorer.exe {}", a.stats.disks.get(i)?.root),
-                    Hit::Cpu | Hit::Ram | Hit::Net => "taskmgr.exe".to_string(),
+                    Hit::Cpu | Hit::Gpu | Hit::Ram | Hit::Net => "taskmgr.exe".to_string(),
                     Hit::Power => {
                         a.toggle_plan(); // ersten Klick des Doppelklicks rueckgaengig machen
                         "control.exe powercfg.cpl".to_string()
@@ -393,6 +405,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 }
 
 fn main() {
+    // Erhoehte Teile fuer die CPU-Temperatur: laufen ohne Fenster und beenden sich mit einem Exit-Code
+    match std::env::args().nth(1).as_deref() {
+        Some("--temp") => std::process::exit(cputemp::dienst()),
+        Some("--temp-einrichten") => std::process::exit(cputemp::aufgabe_anlegen()),
+        Some("--temp-entfernen") => std::process::exit(cputemp::aufgabe_entfernen()),
+        _ => {}
+    }
     unsafe {
         if std::env::args().any(|a| a == "--restart") {
             std::thread::sleep(Duration::from_secs(3)); // Explorer Zeit zum Starten geben

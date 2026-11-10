@@ -28,7 +28,7 @@ pub fn in_programme(exe: &Path) -> bool {
 }
 
 /// Alle Elemente in Standard-Reihenfolge. Jedes kann in der ini oder im Menue einzeln an/aus.
-pub const KNOWN_MODULES: [&str; 8] = ["kopf", "uhr", "cpu", "ram", "platten", "netz", "energie", "ping"];
+pub const KNOWN_MODULES: [&str; 9] = ["kopf", "uhr", "cpu", "gpu", "ram", "platten", "netz", "energie", "ping"];
 
 /// Farbschemata: Name, Hauptfarbe, Akzentfarbe (0xRRGGBB).
 pub const THEMES: [(&str, u32, u32); 7] = [
@@ -44,10 +44,10 @@ pub const THEMES: [(&str, u32, u32); 7] = [
 pub const DEFAULT_SETTINGS: &str = "\
 # Sysglow-Konfiguration. Aenderungen werden beim Speichern automatisch uebernommen.
 #
-# module         = Elemente in dieser Reihenfolge: kopf uhr cpu ram platten netz energie ping (weglassen = aus)
+# module         = Elemente in dieser Reihenfolge: kopf uhr cpu gpu ram platten netz energie ping (weglassen = aus)
 # breite         = Breite in Pixeln (bei 100 % Skalierung)
-# aktualisierung = Sekunden zwischen zwei Messungen von CPU, RAM, Platten, Netz
-# intervall      = Sekunden zwischen zwei Pings (Ping-Werte und Ping-Graph)
+# anzeige_sekunden = Sekunden zwischen zwei Messungen und Bildaufbau (CPU, GPU, RAM, Platten, Netz)
+# ping_sekunden  = Sekunden zwischen zwei Pings (Ping-Werte und Ping-Graph)
 # timeout        = ms bis \"TIMED OUT\"
 # graph_max      = ms, die der Ping-Graph als Obergrenze zeigt
 # gelb / rot     = Prozent, ab denen CPU, RAM und Platten gelb bzw. rot werden
@@ -60,10 +60,10 @@ pub const DEFAULT_SETTINGS: &str = "\
 # energie_auto   = 1: beim Start eines Spiels auf plan_spiel, nach dem Beenden auf plan_normal schalten
 # plan_spiel / plan_normal = GUID des Energieplans (powercfg /list), Standard Hoechstleistung / Ausbalanciert
 # spiele         = Prozessnamen ohne .exe, mit Leerzeichen getrennt; Direct3D-Vollbild zaehlt immer als Spiel
-module = kopf uhr cpu ram platten netz energie ping
+module = kopf uhr cpu gpu ram platten netz energie ping
 breite = 220
-aktualisierung = 1
-intervall = 5
+anzeige_sekunden = 3
+ping_sekunden = 3
 timeout = 3000
 graph_max = 500
 gelb = 80
@@ -128,8 +128,8 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
     let mut s = Settings {
         modules: KNOWN_MODULES.iter().map(|m| m.to_string()).collect(),
         width: 220.0,
-        refresh: 1,
-        interval: 5,
+        refresh: 3,
+        interval: 3,
         timeout: 3000,
         graph_max: 500.0,
         yellow: 80.0,
@@ -182,8 +182,9 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
                         .collect()
                 }
                 "breite" => s.width = v.parse::<f32>().unwrap_or(220.0).clamp(120.0, 800.0),
-                "aktualisierung" => s.refresh = v.parse::<u64>().unwrap_or(1).clamp(1, 60),
-                "intervall" => s.interval = v.parse::<u64>().unwrap_or(5).max(1),
+                // alte Namen "aktualisierung" und "intervall" gelten weiter
+                "anzeige_sekunden" | "aktualisierung" => s.refresh = v.parse::<u64>().unwrap_or(3).clamp(1, 60),
+                "ping_sekunden" | "intervall" => s.interval = v.parse::<u64>().unwrap_or(3).max(1),
                 "timeout" => s.timeout = v.parse::<u32>().unwrap_or(3000).max(100),
                 "graph_max" => s.graph_max = v.parse::<f32>().unwrap_or(500.0).max(1.0),
                 "gelb" => s.yellow = v.parse().unwrap_or(80.0),

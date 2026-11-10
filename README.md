@@ -18,23 +18,25 @@ Klick auf das Datum öffnet den Kalender:
 - **Elemente**, jedes einzeln an/aus (Rechtsklick → *Elemente* oder `module =` in der ini):
   - `kopf` – Rechnername (kleine Schrift) und Laufzeit
   - `uhr` – Wochentag, Datum, Kalenderwoche, Uhrzeit
-  - `cpu` – Last, aktueller Takt (GHz), Verlaufsgraph
+  - `cpu` – Last, aktueller Takt (GHz), Temperatur (optional, siehe unten), Verlaufsgraph
+  - `gpu` – Grafikkarte: Last, Takt, Temperatur, Verlaufsgraph; Hover zeigt den Grafikspeicher. Geht mit AMD, NVIDIA und Intel über dieselben Windows-Werte wie der Task-Manager. Ohne erkannte Karte bleibt das Element unsichtbar, ohne Temperatur vom Treiber fehlt nur die Gradzahl
   - `ram` – belegt/gesamt, Balken
   - `platten` – alle festen Laufwerke mit Füllstand
   - `netz` – Download/Upload mit Verlaufsgraph
   - `energie` – aktiver Energieplan und erkanntes Spiel; Klick wechselt den Plan, Doppelklick öffnet die Energieoptionen
   - `ping` – beliebig viele Hosts (ICMP), Farbe nach Schwellwert, optional Graph
 - **Energieplan automatisch**: Startet ein Spiel (Prozess aus `spiele` oder Direct3D-Vollbild), schaltet glow auf `plan_spiel` (Höchstleistung); ist das Spiel beendet, zurück auf `plan_normal` (Ausbalanciert). Umgeschaltet wird nur beim Wechsel – wer zwischendurch von Hand umstellt, wird nicht überstimmt. Funktioniert auch, wenn das Element `energie` ausgeblendet ist; abschalten mit `energie_auto = 0` oder im Menü.
+- **CPU-Temperatur** (optional): Windows gibt sie nur mit Adminrechten heraus. Rechtsklick → *CPU-Temperatur lesen (einmal Admin)* fragt einmal nach Adminrechten und legt die Aufgabe *Sysglow CPU-Temperatur* in der Aufgabenplanung an. Danach startet Sysglow den erhöhten Teil (`Sysglow.exe --temp`) selbst ohne Abfrage; er liest die Temperatur alle 2 s über den [PawnIO](https://pawnio.eu)-Treiber, denselben Weg wie LibreHardwareMonitor und FanControl, und beendet sich mit der Anzeige. Voraussetzung: PawnIO ist installiert (kommt z. B. mit FanControl mit oder einzeln von pawnio.eu). Intel ab Core 2 und AMD Ryzen (Zen); AMD ist ungetestet. Noch einmal klicken entfernt die Aufgabe. Ohne Einrichtung steht dort `–°C`.
 - **Farben**: Rechtsklick → *Farbe* (grün, cyan, blau, lila, amber, rot, weiß) oder eigene Farbe als `RRGGBB` in der ini
 - Liegt nur auf dem Desktop (unter allen Fenstern), blendet sich bei Vollbild und Spielen aus
 - Tray-Icon, verschiebbar per Maus, Position wird gespeichert
 - Hover zeigt Details (freier Platz, IP-Adresse), Klick auf einen Ping schaltet dessen Graph
-- Hover auf einen Graphen (CPU, Netz, Ping) zeigt Uhrzeit und Wert dieser Messung
+- Hover auf einen Graphen (CPU, GPU, Netz, Ping) zeigt Uhrzeit und Wert dieser Messung
 - Klick auf Datum oder Uhrzeit öffnet den Kalender links neben dem Widget: `<` `>`, Mausrad oder Pfeiltasten wechseln den Monat, Klick auf den Titel springt zu heute, Esc oder Klick daneben schließt
-- Doppelklick: CPU/RAM/Netz → Task-Manager, Laufwerk → Explorer, Ping → eigener Befehl
+- Doppelklick: CPU/GPU/RAM/Netz → Task-Manager, Laufwerk → Explorer, Ping → eigener Befehl
 - ini wird beim Speichern automatisch neu geladen
 - Sehr sparsam: ca. 770 KB exe, ca. 18 MB RAM, kaum CPU
-- Nur normale Windows-Abfragen (kein Treiber, keine Injektion) – unauffällig für Anti-Cheat
+- Nur normale Windows-Abfragen (keine Injektion) – unauffällig für Anti-Cheat. Einzige Ausnahme ist die optionale CPU-Temperatur über den signierten PawnIO-Treiber
 
 ## Installation
 
@@ -60,10 +62,10 @@ Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach
 
 | Schlüssel | Bedeutung | Standard |
 |---|---|---|
-| `module` | Elemente in Reihenfolge: `kopf uhr cpu ram platten netz energie ping` | alle |
+| `module` | Elemente in Reihenfolge: `kopf uhr cpu gpu ram platten netz energie ping` | alle |
 | `breite` | Breite in Pixeln (100 % Skalierung) | 220 |
-| `aktualisierung` | Sekunden zwischen Messungen von CPU, RAM, Platten, Netz | 1 |
-| `intervall` | Sekunden zwischen zwei Pings (Werte und Ping-Graph) | 5 |
+| `anzeige_sekunden` | Sekunden zwischen Messungen und Bildaufbau (CPU, GPU, RAM, Platten, Netz); früher `aktualisierung` | 3 |
+| `ping_sekunden` | Sekunden zwischen zwei Pings (Werte und Ping-Graph); früher `intervall` | 3 |
 | `timeout` | ms bis „TIMED OUT“ | 3000 |
 | `graph_max` | Obergrenze des Ping-Graphen in ms | 500 |
 | `gelb` / `rot` | Prozent-Schwellen für CPU, RAM, Platten | 80 / 90 |
@@ -104,6 +106,8 @@ Ergebnis: `target\release\sysglow.exe`.
 | `src/app.rs` | Zustand und je eine Funktion pro Element (`el_kopf`, `el_cpu`, …) |
 | `src/config.rs` | ini lesen, Standardwerte, Elemente an/aus |
 | `src/stats.rs` | Systemwerte (CPU, Takt, RAM, Platten, Netz) |
+| `src/gpu.rs` | Grafikkarte (D3DKMT und Leistungsindikatoren, herstellerneutral) |
+| `src/cputemp.rs` | CPU-Temperatur: erhöhter Teil über PawnIO, gemeinsamer Speicher, Aufgabe einrichten. Module in `assets/pawnio/` (PawnIO.Modules 0.2.11, LGPL-2.1) |
 | `src/ping.rs` | ICMP-Ping im Hintergrund-Thread pro Host |
 | `src/power.rs` | Energieplan lesen/setzen, laufende Spiele erkennen |
 | `src/kalender.rs` | Kalender-Popup |

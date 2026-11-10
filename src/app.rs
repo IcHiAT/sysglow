@@ -15,6 +15,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::config::*;
 use crate::gfx::*;
+use crate::gpu::Gpu;
 use crate::ping::*;
 use crate::stats::*;
 
@@ -33,6 +34,7 @@ const GRAPH_H: f32 = 26.0;
 pub enum Hit {
     Uhr,
     Cpu,
+    Gpu,
     Ram,
     Disk(usize),
     Net,
@@ -62,6 +64,12 @@ pub struct App {
     pub settings: Settings,
     pub hosts: Vec<Host>,
     pub stats: Stats,
+    /// None, wenn keine passende Grafikkarte erkannt wurde; das Element bleibt dann unsichtbar
+    pub gpu: Option<Gpu>,
+    /// CPU-Temperatur vom erhoehten Teil (`--temp`); None ohne Einrichtung oder ohne PawnIO
+    pub cputemp: crate::cputemp::Leser,
+    pub cpu_temp: Option<f32>,
+    takte: u32,
     computer: String,
     pub font: HFONT,
     /// aktiver Energieplan (GUID), bekannte Plan-Namen und erkanntes Spiel
@@ -168,6 +176,10 @@ impl App {
             settings: parse_config("").0,
             hosts: Vec::new(),
             stats: Stats::new(),
+            gpu: Gpu::new(),
+            cputemp: crate::cputemp::Leser::new(),
+            cpu_temp: None,
+            takte: 0,
             computer: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into()),
             font,
             plan: None,
@@ -398,12 +410,20 @@ impl App {
         self.update_visibility();
     }
 
-    /// Timer (alle `aktualisierung` Sekunden): Systemwerte messen und neu zeichnen.
+    /// Timer (alle `anzeige_sekunden` Sekunden): Systemwerte messen und neu zeichnen.
     pub fn tick(&mut self) {
         if mtime(&self.cfg_path) != self.cfg_mtime {
             self.load_config();
         }
         self.stats.sample();
+        if let Some(g) = &mut self.gpu {
+            g.sample();
+        }
+        self.cpu_temp = self.cputemp.wert();
+        self.takte = self.takte.wrapping_add(1);
+        if self.cpu_temp.is_none() && self.takte % 100 == 0 {
+            self.cputemp.anstossen(); // Dienst neu starten, falls er weggefallen ist
+        }
         self.update_power();
         self.update_visibility();
         self.render();
@@ -500,33 +520,71 @@ impl App {
         f.y += f.rh;
     }
 
+    /// CPU und GPU: oben Name und Last, darunter Takt und Temperatur in festen Spalten, damit beide
+    /// Elemente genau untereinander stehen. Fehlt ein Wert (CPU-Temperatur ohne Adminrechte), steht dort "–".
+    #[allow(clippy::too_many_arguments)]
+    fn werte_zeile(&self, f: &mut Frame, label: &str, name: &str, ghz: Option<f32>, temp: Option<f32>, pct: f32, zeit: Option<u32>) {
+        let st = &self.settings;
+        let pcol = self.measure("100%");
+        self.put(f, &format!("{pct:.0}%"), f.w - f.pad, true, f.inner, self.level(pct));
+        let lw = self.put(f, label, f.pad, false, f.inner, st.fg);
+        let links = f.pad + lw + f.gap;
+        let breite = f.inner - lw - pcol - 2 * f.gap;
+        match zeit {
+            // Maus auf dem Graphen: Uhrzeit dieser Messung statt Name
+            Some(z) => self.put(f, &hms(z), links, false, breite, st.accent),
+            None => self.put(f, name, links, false, breite, st.dim),
+        };
+        f.y += f.rh;
+        let gw = self.measure("9.9 GHz");
+        let tw = self.measure("100\u{b0}C");
+        match ghz {
+            Some(g) => self.put(f, &format!("{g:.1} GHz"), links, false, gw, st.accent),
+            None => self.put(f, "\u{2013} GHz", links, false, gw, st.dim),
+        };
+        let tx = links + gw + 2 * f.gap;
+        match temp {
+            Some(t) => {
+                let col = if t >= 90.0 { COL_RED } else if t >= 80.0 { COL_YELLOW } else { st.accent };
+                self.put(f, &format!("{t:.0}\u{b0}C"), tx, false, tw, col)
+            }
+            None => self.put(f, "\u{2013}\u{b0}C", tx, false, tw, st.dim),
+        };
+    }
+
     fn el_cpu(&self, f: &mut Frame) {
         let (y0, st) = (f.y, &self.stats);
-        // Prozent in fester Spalte (Breite von "100%"), damit GHz nicht hin und her springt
-        let pcol = self.measure("100%");
         let sh = self.px(SPARK_H);
-        let gr = rect(f.pad, f.y + f.rh, f.w - f.pad, f.y + f.rh + sh);
+        let gr = rect(f.pad, f.y + 2 * f.rh, f.w - f.pad, f.y + 2 * f.rh + sh);
         let p = self.punkt(&gr, st.cpu_hist.len());
-        if let Some(i) = p {
-            let v = st.cpu_hist[i] * 100.0;
-            self.put(f, &format!("{v:.0}%"), f.w - f.pad, true, f.inner, self.level(v));
-            let lw = self.put(f, "CPU", f.pad, false, f.inner, self.settings.fg);
-            self.put(f, &hms(st.zeit_hist[i]), f.pad + lw + f.gap, false, f.inner - lw - pcol - 2 * f.gap, self.settings.accent);
-        } else {
-            self.put(f, &format!("{:.0}%", st.cpu), f.w - f.pad, true, f.inner, self.level(st.cpu));
-            let gw = if st.ghz > 0.0 {
-                self.put(f, &format!("{:.1} GHz", st.ghz), f.w - f.pad - pcol - f.gap, true, f.inner, self.settings.accent) + f.gap
-            } else {
-                0
-            };
-            let lw = self.put(f, "CPU", f.pad, false, f.inner, self.settings.fg);
-            self.put(f, &st.cpu_name, f.pad + lw + f.gap, false, f.inner - lw - pcol - gw - 2 * f.gap, self.settings.dim);
-        }
+        let pct = p.map_or(st.cpu, |i| st.cpu_hist[i] * 100.0);
+        self.werte_zeile(f, "CPU", &st.cpu_name, (st.ghz > 0.0).then_some(st.ghz), self.cpu_temp, pct, p.map(|i| st.zeit_hist[i]));
         f.y += f.rh;
         f.dr.push(Draw::Spark(gr, st.cpu_hist.iter().copied().collect(), self.settings.fg));
         self.marke(f, gr, p);
         f.y += sh + self.px(3.0);
         f.hits.push((y0, f.y, Hit::Cpu));
+    }
+
+    /// GPU: Name, Takt, Temperatur und Last, darunter der Verlauf wie bei CPU und Netz. Hover zeigt den Grafikspeicher.
+    fn el_gpu(&self, f: &mut Frame) {
+        let Some(g) = &self.gpu else { return };
+        let y0 = f.y;
+        let sh = self.px(SPARK_H);
+        let gr = rect(f.pad, f.y + 2 * f.rh, f.w - f.pad, f.y + 2 * f.rh + sh);
+        let p = self.punkt(&gr, g.hist.len());
+        let pct = p.map_or(g.load, |i| g.hist[i] * 100.0);
+        let name = if self.hover == Some(Hit::Gpu) && g.vram_total > 0 {
+            format!("{} {:.1}/{:.0} GB", g.speicher_name(), gb(g.vram_used as f64), gb(g.vram_total as f64))
+        } else {
+            g.name.clone()
+        };
+        self.werte_zeile(f, "GPU", &name, g.ghz, g.temp, pct, p.map(|i| g.zeit[i]));
+        f.y += f.rh;
+        f.dr.push(Draw::Spark(gr, g.hist.iter().copied().collect(), self.settings.fg));
+        self.marke(f, gr, p);
+        f.y += sh + self.px(3.0);
+        f.hits.push((y0, f.y, Hit::Gpu));
     }
 
     fn el_ram(&self, f: &mut Frame) {
@@ -641,7 +699,9 @@ impl App {
         let pad = self.px(PAD);
         let mut f = Frame { ops: Vec::new(), dr: Vec::new(), hits: Vec::new(), graphs: Vec::new(), y: self.px(3.0), w, pad, gap: self.px(GAP), rh: self.px(ROW_H), inner: w - 2 * pad };
 
-        for (mi, m) in self.settings.modules.iter().enumerate() {
+        // Elemente ohne Daten (GPU nicht erkannt) ganz weglassen, auch ohne Trennlinie
+        let modules: Vec<&String> = self.settings.modules.iter().filter(|m| *m != "gpu" || self.gpu.is_some()).collect();
+        for (mi, m) in modules.into_iter().enumerate() {
             if mi > 0 {
                 let sh = self.px(SEP_H);
                 f.dr.push(Draw::Fill(rect(pad, f.y + sh / 2, w - pad, f.y + sh / 2 + 1), self.settings.dim, 0.5));
@@ -652,6 +712,7 @@ impl App {
                 "uhr" => self.el_uhr(&mut f),
                 "energie" => self.el_energie(&mut f),
                 "cpu" => self.el_cpu(&mut f),
+                "gpu" => self.el_gpu(&mut f),
                 "ram" => self.el_ram(&mut f),
                 "platten" => self.el_platten(&mut f),
                 "netz" => self.el_netz(&mut f),

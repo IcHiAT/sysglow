@@ -1,0 +1,4 @@
+IntelMSR.bin und AMDFamily17.bin stammen unverändert aus PawnIO.Modules 0.2.11
+https://github.com/namazso/PawnIO.Modules/releases/tag/0.2.11 (release_0_2_11.zip)
+Lizenz: LGPL-2.1, siehe COPYING. Quelltext: https://github.com/namazso/PawnIO.Modules
+Die Module sind vom Autor signiert; der PawnIO-Treiber lädt nur signierte Module.
