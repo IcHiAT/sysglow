@@ -282,6 +282,13 @@ unsafe fn anlegen(font: HFONT) {
     KAL.with(|s| *s.borrow_mut() = Some(k));
 }
 
+/// Neue Grundschrift nach einem Zoom; der Kalender zeichnet mit der Schrift seiner Flaeche.
+pub unsafe fn schrift(font: HFONT) {
+    mit_kal(|k| {
+        SelectObject(k.text.dc, font as HGDIOBJ);
+    });
+}
+
 /// Klick auf das Datum: oeffnet den Kalender links neben dem Widget (`widget` = Fensterrechteck) oder schliesst ihn.
 pub unsafe fn umschalten(widget: RECT, font: HFONT, scale: f32, fg: u32, dim: u32, accent: u32) {
     if KAL.with(|k| k.borrow().is_none()) {

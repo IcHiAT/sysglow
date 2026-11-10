@@ -68,6 +68,40 @@ static EXITING: AtomicBool = AtomicBool::new(false);
 static TASKBAR_MSG: AtomicU32 = AtomicU32::new(0);
 static TRAY_ICON: AtomicUsize = AtomicUsize::new(0);
 
+/// Grundschrift fuer eine Skalierung (DPI x Zoom).
+pub unsafe fn schrift(scale: f32) -> HFONT {
+    CreateFontW(
+        -((FONT_PT * scale * 96.0 / 72.0).round() as i32),
+        0,
+        0,
+        0,
+        400,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET as _,
+        OUT_DEFAULT_PRECIS as _,
+        CLIP_DEFAULT_PRECIS as _,
+        CLEARTYPE_QUALITY as _,
+        0,
+        wide(FONT_NAME).as_ptr(),
+    )
+}
+
+/// + und - (Haupttastatur und Ziffernblock) als Hotkeys, solange die Maus ueber dem Widget steht.
+/// Das Widget nimmt nie den Fokus, deshalb gehen normale Tastenmeldungen nicht.
+const ZOOM_TASTEN: [(i32, u16); 4] = [(1, VK_ADD), (2, VK_OEM_PLUS), (3, VK_SUBTRACT), (4, VK_OEM_MINUS)];
+
+pub unsafe fn zoom_tasten(hwnd: HWND, an: bool) {
+    for (id, vk) in ZOOM_TASTEN {
+        if an {
+            RegisterHotKey(hwnd, id, 0, vk as u32);
+        } else {
+            UnregisterHotKey(hwnd, id);
+        }
+    }
+}
+
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
@@ -285,12 +319,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     let mut t = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
                     TrackMouseEvent(&mut t);
                     a.tracking = true;
+                    zoom_tasten(hwnd, true);
                 }
                 a.mouse_at(Some((mouse_x, mouse_y)));
             });
             0
         }
         WM_MOUSELEAVE => {
+            zoom_tasten(hwnd, false);
             with_app(|a| {
                 a.tracking = false;
                 a.mouse_at(None);
@@ -379,6 +415,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             0
         }
+        WM_HOTKEY => {
+            let groesser = wp == 1 || wp == 2;
+            with_app(|a| a.zoom_schritt(groesser));
+            0
+        }
         WM_MOUSEACTIVATE => MA_NOACTIVATE as LRESULT,
         WM_QUERYENDSESSION => {
             EXITING.store(true, Relaxed);
@@ -459,23 +500,7 @@ fn main() {
             null(),
         );
 
-        let make_font = |pt: f32| CreateFontW(
-            -((pt * scale * 96.0 / 72.0).round() as i32),
-            0,
-            0,
-            0,
-            400,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET as _,
-            OUT_DEFAULT_PRECIS as _,
-            CLIP_DEFAULT_PRECIS as _,
-            CLEARTYPE_QUALITY as _,
-            0,
-            wide(FONT_NAME).as_ptr(),
-        );
-        let font = make_font(FONT_PT);
+        let font = schrift(scale);
 
         let cfg_path = config::ini_pfad();
         let mut app = App::new(hwnd, scale, font, cfg_path);

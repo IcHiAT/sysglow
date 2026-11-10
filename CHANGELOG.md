@@ -1,5 +1,9 @@
 # Changelog
 
+## Unveröffentlicht
+
+- Neu: Maus aufs Widget und `+` oder `-` drücken macht Sysglow größer oder kleiner (5er-Schritte, 50–300 %). Die Größe steht als `zoom` in der `sysglow.ini` und gilt nach dem Neustart weiter. Der Kalender wächst mit.
+
 ## 0.7.0 (10.11.2026)
 
 - Neu: Element `gpu` mit Last, Temperatur und Verlaufsgraph; Hover zeigt den belegten Grafikspeicher. Funktioniert mit AMD, NVIDIA und Intel ohne Zusatzsoftware und ohne Administratorrechte. Bei mehreren Karten zählt die mit dem meisten eigenen Speicher.

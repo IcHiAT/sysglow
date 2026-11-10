@@ -64,6 +64,7 @@ Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach
 |---|---|---|
 | `module` | Elemente in Reihenfolge: `kopf uhr cpu gpu ram platten netz energie ping` | alle |
 | `breite` | Breite in Pixeln (100 % Skalierung) | 220 |
+| `zoom` | Größe in Prozent (50–300); Maus aufs Widget, dann `+`/`-` | 100 |
 | `anzeige_sekunden` | Sekunden zwischen Messungen und Bildaufbau (CPU, GPU, RAM, Platten, Netz); früher `aktualisierung` | 3 |
 | `ping_sekunden` | Sekunden zwischen zwei Pings (Werte und Ping-Graph); früher `intervall` | 3 |
 | `timeout` | ms bis „TIMED OUT“ | 3000 |

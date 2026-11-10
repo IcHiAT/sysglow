@@ -89,6 +89,8 @@ pub struct App {
     visible: bool,
     pub user_hidden: bool,
     pub scale: f32,
+    /// Skalierung des Systems (DPI); `scale` = dpi x zoom
+    dpi: f32,
     size: (i32, i32),
     text: Surface,
     out: Surface,
@@ -197,6 +199,7 @@ impl App {
             visible: false,
             user_hidden: false,
             scale,
+            dpi: scale,
             size: (0, 0),
             text: new_surface(font),
             out: new_surface(null_mut()),
@@ -281,6 +284,38 @@ impl App {
         unsafe { SetTimer(self.hwnd, 1, (settings.refresh * 1000) as u32, None) };
         self.settings = settings;
         self.hover = None;
+        self.zoom_anwenden();
+    }
+
+    /// Setzt Skalierung und Schrift passend zu `settings.zoom`; nur bei Aenderung.
+    fn zoom_anwenden(&mut self) {
+        let scale = self.dpi * self.settings.zoom as f32 / 100.0;
+        if (scale - self.scale).abs() < 0.001 {
+            return;
+        }
+        unsafe {
+            let alt = self.font;
+            self.font = crate::schrift(scale);
+            SelectObject(self.text.dc, self.font as HGDIOBJ);
+            crate::kalender::schrift(self.font);
+            DeleteObject(alt as HGDIOBJ);
+        }
+        self.scale = scale;
+    }
+
+    /// + / - ueber dem Widget: Zoom in 5er-Schritten, in der ini gespeichert.
+    pub fn zoom_schritt(&mut self, groesser: bool) {
+        use crate::config::{ZOOM_MAX, ZOOM_MIN, ZOOM_SCHRITT};
+        let z = self.settings.zoom;
+        let neu = if groesser { z + ZOOM_SCHRITT } else { z.saturating_sub(ZOOM_SCHRITT) };
+        let neu = (neu / ZOOM_SCHRITT * ZOOM_SCHRITT).clamp(ZOOM_MIN, ZOOM_MAX);
+        if neu == z {
+            return;
+        }
+        self.settings.zoom = neu;
+        self.set_key("zoom", &neu.to_string());
+        self.zoom_anwenden();
+        self.render();
     }
 
     fn write_lines(&mut self, lines: &[String]) {

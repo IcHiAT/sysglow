@@ -30,6 +30,10 @@ pub fn in_programme(exe: &Path) -> bool {
 /// Alle Elemente in Standard-Reihenfolge. Jedes kann in der ini oder im Menue einzeln an/aus.
 pub const KNOWN_MODULES: [&str; 9] = ["kopf", "uhr", "cpu", "gpu", "ram", "platten", "netz", "energie", "ping"];
 
+pub const ZOOM_MIN: u32 = 50;
+pub const ZOOM_MAX: u32 = 300;
+pub const ZOOM_SCHRITT: u32 = 5;
+
 /// Farbschemata: Name, Hauptfarbe, Akzentfarbe (0xRRGGBB).
 pub const THEMES: [(&str, u32, u32); 7] = [
     ("gruen", 0x7CFFB2, 0x40C8FF),
@@ -46,6 +50,7 @@ pub const DEFAULT_SETTINGS: &str = "\
 #
 # module         = Elemente in dieser Reihenfolge: kopf uhr cpu gpu ram platten netz energie ping (weglassen = aus)
 # breite         = Breite in Pixeln (bei 100 % Skalierung)
+# zoom           = Groesse in Prozent, 50 bis 300 (Maus aufs Widget, dann + oder -)
 # anzeige_sekunden = Sekunden zwischen zwei Messungen und Bildaufbau (CPU, GPU, RAM, Platten, Netz)
 # ping_sekunden  = Sekunden zwischen zwei Pings (Ping-Werte und Ping-Graph)
 # timeout        = ms bis \"TIMED OUT\"
@@ -62,6 +67,7 @@ pub const DEFAULT_SETTINGS: &str = "\
 # spiele         = Prozessnamen ohne .exe, mit Leerzeichen getrennt; Direct3D-Vollbild zaehlt immer als Spiel
 module = kopf uhr cpu gpu ram platten netz energie ping
 breite = 220
+zoom = 100
 anzeige_sekunden = 3
 ping_sekunden = 3
 timeout = 3000
@@ -91,6 +97,8 @@ Cloudflare | 1.1.1.1     | 40 | 80 | 0
 pub struct Settings {
     pub modules: Vec<String>,
     pub width: f32,
+    /// Groesse in Prozent (50..300), wirkt auf alles samt Schrift
+    pub zoom: u32,
     pub refresh: u64,
     pub interval: u64,
     pub timeout: u32,
@@ -128,6 +136,7 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
     let mut s = Settings {
         modules: KNOWN_MODULES.iter().map(|m| m.to_string()).collect(),
         width: 220.0,
+        zoom: 100,
         refresh: 3,
         interval: 3,
         timeout: 3000,
@@ -183,6 +192,7 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
                 }
                 "breite" => s.width = v.parse::<f32>().unwrap_or(220.0).clamp(120.0, 800.0),
                 // alte Namen "aktualisierung" und "intervall" gelten weiter
+                "zoom" => s.zoom = v.trim_end_matches('%').trim().parse::<u32>().unwrap_or(100).clamp(ZOOM_MIN, ZOOM_MAX),
                 "anzeige_sekunden" | "aktualisierung" => s.refresh = v.parse::<u64>().unwrap_or(3).clamp(1, 60),
                 "ping_sekunden" | "intervall" => s.interval = v.parse::<u64>().unwrap_or(3).max(1),
                 "timeout" => s.timeout = v.parse::<u32>().unwrap_or(3000).max(100),
