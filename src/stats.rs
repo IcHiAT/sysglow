@@ -34,6 +34,9 @@ pub struct Stats {
     pub zeit_hist: VecDeque<u32>,
     perf: Option<(isize, isize, isize)>,
     pub ghz: f32,
+    /// Takt und CPU-Temperatur je Messung, parallel zu cpu_hist (fuer Hover auf dem Graphen)
+    pub ghz_hist: VecDeque<f32>,
+    pub temp_hist: VecDeque<Option<f32>>,
     pub mem_total: f64,
     pub mem_avail: f64,
     pub disks: Vec<Disk>,
@@ -185,6 +188,8 @@ impl Stats {
             zeit_hist: VecDeque::new(),
             perf: open_perf(),
             ghz: 0.0,
+            ghz_hist: VecDeque::new(),
+            temp_hist: VecDeque::new(),
             mem_total: 0.0,
             mem_avail: 0.0,
             disks: read_disks(),
@@ -198,7 +203,8 @@ impl Stats {
         }
     }
 
-    pub fn sample(&mut self) {
+    /// `temp` = CPU-Temperatur dieser Messung (kommt vom erhoehten Teil, nicht von hier)
+    pub fn sample(&mut self, temp: Option<f32>) {
         unsafe {
             let (mut i, mut k, mut u): (FILETIME, FILETIME, FILETIME) = (zeroed(), zeroed(), zeroed());
             if GetSystemTimes(&mut i, &mut k, &mut u) != 0 {
@@ -229,6 +235,8 @@ impl Stats {
             self.uptime = GetTickCount64() / 1000;
         }
         push_hist(&mut self.cpu_hist, self.cpu / 100.0);
+        push_hist(&mut self.ghz_hist, self.ghz);
+        push_hist(&mut self.temp_hist, temp);
         push_hist(&mut self.zeit_hist, jetzt());
         if self.disk_at.elapsed() >= Duration::from_secs(10) {
             self.disk_at = Instant::now();

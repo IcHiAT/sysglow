@@ -39,6 +39,9 @@ pub struct Gpu {
     pub ghz: Option<f32>,
     pub hist: VecDeque<f32>,
     pub zeit: VecDeque<u32>,
+    /// Takt und Temperatur je Messung, parallel zu hist (fuer Hover auf dem Graphen)
+    pub ghz_hist: VecDeque<Option<f32>>,
+    pub temp_hist: VecDeque<Option<f32>>,
 }
 
 impl Drop for Gpu {
@@ -200,6 +203,8 @@ impl Gpu {
                 ghz: None,
                 hist: VecDeque::new(),
                 zeit: VecDeque::new(),
+                ghz_hist: VecDeque::new(),
+                temp_hist: VecDeque::new(),
             })
         }
     }
@@ -223,6 +228,8 @@ impl Gpu {
         }
         push_hist(&mut self.hist, self.load / 100.0);
         push_hist(&mut self.zeit, jetzt());
+        push_hist(&mut self.ghz_hist, self.ghz);
+        push_hist(&mut self.temp_hist, self.temp);
     }
 
     pub fn speicher_name(&self) -> &str {

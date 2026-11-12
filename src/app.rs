@@ -29,6 +29,26 @@ const BAR_H: f32 = 4.0;
 const DISK_BAR_H: f32 = 7.0;
 const SEP_H: f32 = 7.0;
 const GRAPH_H: f32 = 26.0;
+/// Groesse der kleinen Schrift relativ zur normalen
+const KLEIN: f32 = 0.8;
+/// Todo-Box: Innenabstand und Kaestchen
+const TODO_IP: f32 = 4.0;
+const TODO_KB: f32 = 8.0;
+
+/// Letzte deutliche Spitze im sichtbaren Teil eines Ping-Verlaufs: (Index, ms).
+/// Deutlich = mindestens 1,5-mal der Median und 5 ms darueber. Timeouts (= graph_max) zaehlen nicht.
+pub fn ping_spitze(werte: &[f32], gmax: f32) -> Option<(usize, f32)> {
+    let ok: Vec<f32> = werte.iter().copied().filter(|&v| v < gmax).collect();
+    if ok.len() < 3 {
+        return None;
+    }
+    let mut sortiert = ok.clone();
+    sortiert.sort_by(|a, b| a.total_cmp(b));
+    let median = sortiert[sortiert.len() / 2];
+    // bei gleich hohen Spitzen die juengste
+    let (i, v) = werte.iter().copied().enumerate().filter(|&(_, v)| v < gmax).fold((0, f32::MIN), |m, (i, v)| if v >= m.1 { (i, v) } else { m });
+    (v >= median * 1.5 && v - median >= 5.0).then_some((i, v))
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Hit {
@@ -40,6 +60,8 @@ pub enum Hit {
     Net,
     Ping(usize),
     Power,
+    /// Todo-Box: Aufgabe (Index) oder Kopf/leere Flaeche
+    Todo(Option<usize>),
 }
 
 pub struct Host {
@@ -69,9 +91,15 @@ pub struct App {
     /// CPU-Temperatur vom erhoehten Teil (`--temp`); None ohne Einrichtung oder ohne PawnIO
     pub cputemp: crate::cputemp::Leser,
     pub cpu_temp: Option<f32>,
+    /// Todo-Liste aus der Datei, deren Aenderungszeit und die Flaeche der Box im letzten Bild
+    todo: Vec<crate::todo::Aufgabe>,
+    todo_mtime: Option<SystemTime>,
+    todo_rc: Option<RECT>,
     takte: u32,
     computer: String,
     pub font: HFONT,
+    /// kleine Schrift (Ping-Spitze im Graphen)
+    font_klein: HFONT,
     /// aktiver Energieplan (GUID), bekannte Plan-Namen und erkanntes Spiel
     pub plan: Option<String>,
     plan_names: Vec<(String, String)>,
@@ -102,6 +130,7 @@ struct Frame {
     dr: Vec<Draw>,
     hits: Vec<(i32, i32, Hit)>,
     graphs: Vec<RECT>,
+    todo_rc: Option<RECT>,
     y: i32,
     w: i32,
     pad: i32,
@@ -181,9 +210,13 @@ impl App {
             gpu: Gpu::new(),
             cputemp: crate::cputemp::Leser::new(),
             cpu_temp: None,
+            todo: Vec::new(),
+            todo_mtime: None,
+            todo_rc: None,
             takte: 0,
             computer: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into()),
             font,
+            font_klein: crate::schrift(scale * KLEIN),
             plan: None,
             plan_names: Vec::new(),
             game: None,
@@ -286,6 +319,7 @@ impl App {
         self.settings = settings;
         self.hover = None;
         self.zoom_anwenden();
+        self.todo_laden();
     }
 
     /// Setzt Skalierung und Schrift passend zu `settings.zoom`; nur bei Aenderung.
@@ -299,6 +333,9 @@ impl App {
             self.font = crate::schrift(scale);
             SelectObject(self.text.dc, self.font as HGDIOBJ);
             crate::kalender::schrift(self.font);
+            DeleteObject(alt as HGDIOBJ);
+            let alt = self.font_klein;
+            self.font_klein = crate::schrift(scale * KLEIN);
             DeleteObject(alt as HGDIOBJ);
         }
         self.scale = scale;
@@ -449,6 +486,43 @@ impl App {
         self.render();
     }
 
+    // ------------------------------------------------------------ Todo
+    pub fn todo_pfad(&self) -> PathBuf {
+        crate::todo::pfad(&self.cfg_path, &self.settings.todo_datei)
+    }
+
+    /// Liest die Todo-Datei neu (beim Start, nach dem Editor und wenn sie jemand anders geaendert hat).
+    pub fn todo_laden(&mut self) {
+        let p = self.todo_pfad();
+        self.todo = crate::todo::lesen(&std::fs::read_to_string(&p).unwrap_or_default());
+        self.todo_mtime = mtime(&p);
+    }
+
+    /// Rechte Kante der Kaestchen-Spalte: Klick links davon hakt ab.
+    fn todo_kx(&self, pad: i32) -> i32 {
+        pad + self.px(TODO_IP + TODO_KB + 4.0)
+    }
+
+    /// Klick in die Todo-Box: aufs Kaestchen = abhaken, sonst Editor oeffnen.
+    /// Gibt die Werte fuer den Editor zurueck; geoeffnet wird er ausserhalb von `with_app`.
+    pub fn todo_klick(&mut self, i: Option<usize>, x: i32) -> Option<(RECT, PathBuf, f32, u32, u32)> {
+        let p = self.todo_pfad();
+        if let Some(a) = i.and_then(|i| self.todo.get(i)) {
+            if x < self.todo_kx(self.px(PAD)) {
+                let neu = crate::todo::umschalten(&std::fs::read_to_string(&p).unwrap_or_default(), a.zeile);
+                let _ = std::fs::write(&p, neu);
+                self.todo_laden();
+                self.render();
+                return None;
+            }
+        }
+        let r = self.todo_rc?;
+        let mut w = unsafe { zeroed::<RECT>() };
+        unsafe { GetWindowRect(self.hwnd, &mut w) };
+        let r = RECT { left: w.left + r.left, top: w.top + r.top, right: w.left + r.right, bottom: w.top + r.bottom };
+        Some((r, p, self.scale, self.settings.fg, self.settings.dim))
+    }
+
     // ------------------------------------------------------------ Ablauf
     pub fn update_visibility(&mut self) {
         let vis = !self.user_hidden && (self.settings.vollbild_zeigen || !fullscreen_active());
@@ -471,11 +545,14 @@ impl App {
         if mtime(&self.cfg_path) != self.cfg_mtime {
             self.load_config();
         }
-        self.stats.sample();
+        if mtime(&self.todo_pfad()) != self.todo_mtime {
+            self.todo_laden();
+        }
+        self.cpu_temp = self.cputemp.wert();
+        self.stats.sample(self.cpu_temp);
         if let Some(g) = &mut self.gpu {
             g.sample();
         }
-        self.cpu_temp = self.cputemp.wert();
         self.takte = self.takte.wrapping_add(1);
         if self.cpu_temp.is_none() && self.takte % 100 == 0 {
             self.cputemp.anstossen(); // Dienst neu starten, falls er weggefallen ist
@@ -614,7 +691,10 @@ impl App {
         let gr = rect(f.pad, f.y + 2 * f.rh, f.w - f.pad, f.y + 2 * f.rh + sh);
         let p = self.punkt(&gr, st.cpu_hist.len());
         let pct = p.map_or(st.cpu, |i| st.cpu_hist[i] * 100.0);
-        self.werte_zeile(f, "CPU", &st.cpu_name, (st.ghz > 0.0).then_some(st.ghz), self.cpu_temp, pct, p.map(|i| st.zeit_hist[i]));
+        // Mit Maus auf dem Graphen: Takt und Temperatur dieser Messung
+        let ghz = p.map_or(st.ghz, |i| st.ghz_hist.get(i).copied().unwrap_or(0.0));
+        let temp = p.map_or(self.cpu_temp, |i| st.temp_hist.get(i).copied().flatten());
+        self.werte_zeile(f, "CPU", &st.cpu_name, (ghz > 0.0).then_some(ghz), temp, pct, p.map(|i| st.zeit_hist[i]));
         f.y += f.rh;
         f.dr.push(Draw::Spark(gr, st.cpu_hist.iter().copied().collect(), self.settings.fg));
         self.marke(f, gr, p);
@@ -635,7 +715,9 @@ impl App {
         } else {
             g.name.clone()
         };
-        self.werte_zeile(f, "GPU", &name, g.ghz, g.temp, pct, p.map(|i| g.zeit[i]));
+        let ghz = p.map_or(g.ghz, |i| g.ghz_hist.get(i).copied().flatten());
+        let temp = p.map_or(g.temp, |i| g.temp_hist.get(i).copied().flatten());
+        self.werte_zeile(f, "GPU", &name, ghz, temp, pct, p.map(|i| g.zeit[i]));
         f.y += f.rh;
         f.dr.push(Draw::Spark(gr, g.hist.iter().copied().collect(), self.settings.fg));
         self.marke(f, gr, p);
@@ -736,11 +818,86 @@ impl App {
             f.y += f.rh;
             if host.cfg.graph {
                 f.dr.push(Draw::Line(gr, host.hist.iter().map(|v| v / gmax).collect(), self.settings.accent));
+                self.spitze(f, gr, &host.hist, gmax);
                 self.marke(f, gr, p);
                 f.y += gh + self.px(3.0);
             }
             f.hits.push((yh, f.y, Hit::Ping(i)));
         }
+    }
+
+    /// Kleine rote Zahl an der letzten deutlichen Spitze im sichtbaren Teil des Ping-Graphen.
+    fn spitze(&self, f: &mut Frame, gr: RECT, hist: &VecDeque<f32>, gmax: f32) {
+        let breite = (gr.right - gr.left).max(0) as usize;
+        let n = hist.len().min(breite);
+        let sichtbar: Vec<f32> = hist.iter().skip(hist.len() - n).copied().collect();
+        let Some((k, ms)) = ping_spitze(&sichtbar, gmax) else { return };
+        let x = gr.right - 1 - (n - 1 - k) as i32;
+        let s = format!("{ms:.0}");
+        let tw = self.measure_font(&s, self.font_klein);
+        let abstand = self.px(2.0);
+        // rechts neben die Spitze, am rechten Rand links daneben
+        let x0 = if x + abstand + tw <= gr.right { x + abstand } else { (x - abstand - tw).max(gr.left) };
+        let h = self.px(ROW_H * KLEIN);
+        f.ops.push(TextOp { s: s.encode_utf16().collect(), rc: rect(x0, gr.top, x0 + tw, gr.top + h), col: COL_RED, font: self.font_klein });
+    }
+
+    /// Todo-Liste: Kopfzeile mit Zahl der offenen Aufgaben, darunter eine umrahmte Box,
+    /// die mit dem Text waechst. Lange Aufgaben werden umgebrochen, erledigte gedaempft und durchgestrichen.
+    fn el_todo(&self, f: &mut Frame) {
+        let st = &self.settings;
+        let y0 = f.y;
+        let offen = self.todo.iter().filter(|a| !a.erledigt).count();
+        let rechts = if matches!(self.hover, Some(Hit::Todo(_))) { "Klick: bearbeiten".to_string() } else { format!("{offen} offen") };
+        let rw = self.put(f, &rechts, f.w - f.pad, true, f.inner, st.dim);
+        self.put(f, "TODO", f.pad, false, f.inner - rw - f.gap, st.fg);
+        f.y += f.rh;
+
+        let ip = self.px(TODO_IP);
+        let kb = self.px(TODO_KB).max(4);
+        let dicke = self.px(1.0).max(1);
+        let bx = rect(f.pad, f.y + self.px(2.0), f.w - f.pad, 0);
+        // Kopf und Luecke bis zur ersten Aufgabe
+        f.hits.push((y0, bx.top + ip, Hit::Todo(None)));
+        f.y = bx.top + ip;
+        let tx = self.todo_kx(f.pad);
+        let maxw = bx.right - ip - tx;
+        if self.todo.is_empty() {
+            let y = f.y;
+            self.put(f, "Klick zum Schreiben", bx.left + ip, false, bx.right - bx.left - 2 * ip, st.dim);
+            f.y += f.rh;
+            f.hits.push((y, f.y, Hit::Todo(None)));
+        }
+        for (i, a) in self.todo.iter().enumerate() {
+            let y = f.y;
+            let col = if a.erledigt { st.dim } else { st.fg };
+            // Kaestchen: Rahmen, bei erledigt gefuellt
+            let (kx, ky) = (bx.left + ip, f.y + (f.rh - kb) / 2);
+            let k = rect(kx, ky, kx + kb, ky + kb);
+            for r in [rect(k.left, k.top, k.right, k.top + dicke), rect(k.left, k.bottom - dicke, k.right, k.bottom), rect(k.left, k.top, k.left + dicke, k.bottom), rect(k.right - dicke, k.top, k.right, k.bottom)] {
+                f.dr.push(Draw::Fill(r, col, 0.9));
+            }
+            if a.erledigt {
+                f.dr.push(Draw::Fill(rect(k.left + 2 * dicke, k.top + 2 * dicke, k.right - 2 * dicke, k.bottom - 2 * dicke), st.accent, 0.9));
+            }
+            for z in crate::todo::umbrechen(&a.text, maxw, |s| self.measure(s)) {
+                let tw = self.put(f, &z, tx, false, maxw, col);
+                if a.erledigt {
+                    let my = f.y + f.rh / 2;
+                    f.dr.push(Draw::Fill(rect(tx, my, tx + tw, my + dicke), col, 0.8));
+                }
+                f.y += f.rh;
+            }
+            f.hits.push((y, f.y, Hit::Todo(Some(i))));
+        }
+        f.hits.push((f.y, f.y + ip, Hit::Todo(None)));
+        f.y += ip;
+        let b = RECT { bottom: f.y, ..bx };
+        let rahmen = if matches!(self.hover, Some(Hit::Todo(_))) { 0.8 } else { 0.45 };
+        for r in [rect(b.left, b.top, b.right, b.top + dicke), rect(b.left, b.bottom - dicke, b.right, b.bottom), rect(b.left, b.top, b.left + dicke, b.bottom), rect(b.right - dicke, b.top, b.right, b.bottom)] {
+            f.dr.push(Draw::Fill(r, st.dim, rahmen));
+        }
+        f.todo_rc = Some(b);
     }
 
     // ------------------------------------------------------------ Zeichnen
@@ -753,7 +910,7 @@ impl App {
         }
         let w = self.px(self.settings.width);
         let pad = self.px(PAD);
-        let mut f = Frame { ops: Vec::new(), dr: Vec::new(), hits: Vec::new(), graphs: Vec::new(), y: self.px(3.0), w, pad, gap: self.px(GAP), rh: self.px(ROW_H), inner: w - 2 * pad };
+        let mut f = Frame { ops: Vec::new(), dr: Vec::new(), hits: Vec::new(), graphs: Vec::new(), todo_rc: None, y: self.px(3.0), w, pad, gap: self.px(GAP), rh: self.px(ROW_H), inner: w - 2 * pad };
 
         // Elemente ohne Daten (GPU nicht erkannt) ganz weglassen, auch ohne Trennlinie
         let modules: Vec<&String> = self.settings.modules.iter().filter(|m| *m != "gpu" || self.gpu.is_some()).collect();
@@ -782,6 +939,7 @@ impl App {
                 "platten" => self.el_platten(&mut f),
                 "netz" => self.el_netz(&mut f),
                 "ping" => self.el_ping(&mut f),
+                "todo" => self.el_todo(&mut f),
                 _ => {}
             }
         }
@@ -814,6 +972,7 @@ impl App {
         }
         self.hits = f.hits;
         self.graphs = f.graphs;
+        self.todo_rc = f.todo_rc;
     }
 }
 

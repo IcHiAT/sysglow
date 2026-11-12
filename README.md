@@ -24,7 +24,8 @@ Klick auf das Datum öffnet den Kalender:
   - `platten` – alle festen Laufwerke mit Füllstand
   - `netz` – Download/Upload mit Verlaufsgraph
   - `energie` – aktiver Energieplan und erkanntes Spiel; Klick wechselt den Plan, Doppelklick öffnet die Energieoptionen
-  - `ping` – beliebig viele Hosts (ICMP), Farbe nach Schwellwert, optional Graph
+  - `ping` – beliebig viele Hosts (ICMP), Farbe nach Schwellwert, optional Graph; die letzte deutliche Spitze steht als kleine rote Zahl im Graphen
+  - `todo` – Todo-Liste aus `todo.txt` neben der ini (eine Aufgabe je Zeile, `x ` vorne = erledigt). Klick aufs Kästchen hakt ab, Klick auf den Text öffnet einen Editor, der mit dem Text wächst; Esc oder Klick daneben speichert. Die Datei darf auch ein anderes Programm oder Claude ändern, Sysglow liest sie dann neu
 - **Energieplan automatisch**: Startet ein Spiel (Prozess aus `spiele` oder Direct3D-Vollbild), schaltet glow auf `plan_spiel` (Höchstleistung); ist das Spiel beendet, zurück auf `plan_normal` (Ausbalanciert). Umgeschaltet wird nur beim Wechsel – wer zwischendurch von Hand umstellt, wird nicht überstimmt. Funktioniert auch, wenn das Element `energie` ausgeblendet ist; abschalten mit `energie_auto = 0` oder im Menü.
 - **CPU-Temperatur** (optional): Windows gibt sie nur mit Adminrechten heraus. Rechtsklick → *CPU-Temperatur lesen (einmal Admin)* fragt einmal nach Adminrechten und legt die Aufgabe *Sysglow CPU-Temperatur* in der Aufgabenplanung an. Danach startet Sysglow den erhöhten Teil (`Sysglow.exe --temp`) selbst ohne Abfrage; er liest die Temperatur alle 2 s über den [PawnIO](https://pawnio.eu)-Treiber, denselben Weg wie LibreHardwareMonitor und FanControl, und beendet sich mit der Anzeige. Voraussetzung: PawnIO ist installiert (kommt z. B. mit FanControl mit oder einzeln von pawnio.eu). Intel ab Core 2 und AMD Ryzen (Zen); AMD ist ungetestet. Noch einmal klicken entfernt die Aufgabe. Ohne Einrichtung steht dort `–°C`.
 - **Farben**: Rechtsklick → *Farbe* (grün, cyan, blau, lila, amber, rot, weiß) oder eigene Farbe als `RRGGBB` in der ini
@@ -33,7 +34,7 @@ Klick auf das Datum öffnet den Kalender:
 - Liegt nur auf dem Desktop (unter allen Fenstern), blendet sich bei Vollbild und Spielen aus
 - Tray-Icon, verschiebbar per Maus, Position wird gespeichert
 - Hover zeigt Details (freier Platz, IP-Adresse), Klick auf einen Ping schaltet dessen Graph
-- Hover auf einen Graphen (CPU, GPU, Netz, Ping) zeigt Uhrzeit und Wert dieser Messung
+- Hover auf einen Graphen (CPU, GPU, Netz, Ping) zeigt Uhrzeit und Wert dieser Messung, bei CPU und GPU auch Takt und Temperatur
 - Klick auf Datum oder Uhrzeit öffnet den Kalender links neben dem Widget: `<` `>`, Mausrad oder Pfeiltasten wechseln den Monat, Klick auf den Titel springt zu heute, Esc oder Klick daneben schließt
 - **Termine im Kalender** aus Google-Kalendern oder .ics-Dateien (nur lesen): Urlaub hellorange hinterlegt, Termine blau unterstrichen, Geburtstage pink mit Luftballon; Liste der Einträge unter dem Monat. Das Popup lässt sich verschieben, Rechtsklick darauf schaltet einzelne Kalender an/aus oder lädt neu
 - Doppelklick: CPU/GPU/RAM/Netz → Task-Manager, Laufwerk → Explorer, Ping → eigener Befehl
@@ -65,7 +66,7 @@ Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach
 
 | Schlüssel | Bedeutung | Standard |
 |---|---|---|
-| `module` | Elemente in Reihenfolge: `kopf uhr cpu gpu ram platten netz energie ping` | alle |
+| `module` | Elemente in Reihenfolge: `kopf uhr cpu gpu ram platten netz energie ping todo` | alle |
 | `breite` | Breite in Pixeln (100 % Skalierung) | 220 |
 | `zoom` | Größe in Prozent (50–300); Maus aufs Widget, dann `+`/`-` | 100 |
 | `anzeige_sekunden` | Sekunden zwischen Messungen und Bildaufbau (CPU, GPU, RAM, Platten, Netz); früher `aktualisierung` | 3 |
@@ -86,6 +87,7 @@ Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach
 | `spiele` | Prozessnamen ohne `.exe`, Leerzeichen getrennt | `r5apex r5apex_dx12` |
 | `farbe_termin` / `farbe_urlaub` / `farbe_geburtstag` | Farben `RRGGBB` der Termine | 6CB8FF / FFB070 / FF7EC8 |
 | `vollbild_zeigen` | 1 = bei Vollbild nicht ausblenden (zum Testen) | 0 |
+| `todo_datei` | Datei der Todo-Liste, absolut oder relativ zur ini | `todo.txt` neben der ini |
 
 Ping-Hosts, eine Zeile pro Host:
 
@@ -127,6 +129,7 @@ Ergebnis: `target\release\sysglow.exe`.
 | `src/ping.rs` | ICMP-Ping im Hintergrund-Thread pro Host |
 | `src/power.rs` | Energieplan lesen/setzen, laufende Spiele erkennen |
 | `src/kalender.rs` | Kalender-Popup |
+| `src/todo.rs` | Todo-Datei lesen, abhaken, Zeilenumbruch, Editor-Fenster |
 | `src/gfx.rs` | Zeichnen (Text mit Kontur, Balken, Graphen), Tray-Icon |
 
 Ein neues Element: Namen in `KNOWN_MODULES` (`config.rs`) eintragen, `el_<name>` in `app.rs` schreiben und in `render()` zuordnen, Menütext in `show_menu()` (`main.rs`) ergänzen.

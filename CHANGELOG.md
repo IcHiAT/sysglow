@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 (12.11.2026)
+
+- Neu: Hover auf den CPU- oder GPU-Graphen zeigt neben Last und Uhrzeit auch Takt und Temperatur dieser Messung.
+- Neu: Im Ping-Graphen steht die letzte deutliche Spitze als kleine rote Zahl (ms). Als Spitze zählt ein Wert, der mindestens 1,5-mal so hoch wie der Median des sichtbaren Verlaufs und mindestens 5 ms darüber liegt. Timeouts zählen nicht.
+- Neu: Element `todo` ganz unten, eine umrahmte Liste, die mit dem Text wächst. Die Aufgaben stehen in `todo.txt` neben der `sysglow.ini`: eine Aufgabe je Zeile, `x ` am Anfang heißt erledigt. Die Datei kann jeder bearbeiten, auch Claude; Sysglow liest sie bei jeder Änderung neu. Klick aufs Kästchen hakt ab. Klick auf den Text öffnet einen kleinen Editor über der Box, der beim Schreiben mitwächst; Esc oder Klick daneben speichert. Eine andere Datei lässt sich mit `todo_datei` einstellen.
+- Hinweis: Bestehende `sysglow.ini` bekommt `todo` nicht automatisch. Einschalten über Rechtsklick → *Elemente* → *Todo-Liste*.
+
 ## 0.8.1 (12.11.2026)
 
 - Neu: Die Versionsnummer steht als eigene Zeile ganz oben (`Sysglow v0.8.1`). Abschalten unter Rechtsklick → *Elemente* → *Version* oder `version = 0` in der ini.

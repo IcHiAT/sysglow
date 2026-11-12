@@ -28,7 +28,7 @@ pub fn in_programme(exe: &Path) -> bool {
 }
 
 /// Alle Elemente in Standard-Reihenfolge. Jedes kann in der ini oder im Menue einzeln an/aus.
-pub const KNOWN_MODULES: [&str; 9] = ["kopf", "uhr", "cpu", "gpu", "ram", "platten", "netz", "energie", "ping"];
+pub const KNOWN_MODULES: [&str; 10] = ["kopf", "uhr", "cpu", "gpu", "ram", "platten", "netz", "energie", "ping", "todo"];
 
 pub const ZOOM_MIN: u32 = 50;
 pub const ZOOM_MAX: u32 = 300;
@@ -48,7 +48,7 @@ pub const THEMES: [(&str, u32, u32); 7] = [
 pub const DEFAULT_SETTINGS: &str = "\
 # Sysglow-Konfiguration. Aenderungen werden beim Speichern automatisch uebernommen.
 #
-# module         = Elemente in dieser Reihenfolge: kopf uhr cpu gpu ram platten netz energie ping (weglassen = aus)
+# module         = Elemente in dieser Reihenfolge: kopf uhr cpu gpu ram platten netz energie ping todo (weglassen = aus)
 # breite         = Breite in Pixeln (bei 100 % Skalierung)
 # zoom           = Groesse in Prozent, 50 bis 300 (Maus aufs Widget, dann + oder -)
 # anzeige_sekunden = Sekunden zwischen zwei Messungen und Bildaufbau (CPU, GPU, RAM, Platten, Netz)
@@ -68,13 +68,14 @@ pub const DEFAULT_SETTINGS: &str = "\
 # plan_spiel / plan_normal = GUID des Energieplans (powercfg /list), Standard Hoechstleistung / Ausbalanciert
 # spiele         = Prozessnamen ohne .exe, mit Leerzeichen getrennt; Direct3D-Vollbild zaehlt immer als Spiel
 # vollbild_zeigen = 1: auch ueber Vollbild-Programmen sichtbar bleiben (zum Testen), Standard 0 = ausblenden
+# todo_datei     = Datei der Todo-Liste; leer = todo.txt neben dieser ini (eine Aufgabe je Zeile, \"x \" vorne = erledigt)
 # farbe_termin / farbe_urlaub / farbe_geburtstag = Farben der Termine im Kalender als RRGGBB
 #
 # Termine im Kalender (Klick aufs Datum), eine Zeile je Kalender, nur lesen:
 # kalender = Name | Art (termin, urlaub, geburtstag) | 1 = an, 0 = aus | https-Adresse oder .ics-Datei
 # Google: Kalender-Einstellungen > \"Geheime Adresse im iCal-Format\" kopieren. Diese Adresse nicht weitergeben.
 # kalender = Geburtstage | geburtstag | 1 | https://calendar.google.com/calendar/ical/.../basic.ics
-module = kopf uhr cpu gpu ram platten netz energie ping
+module = kopf uhr cpu gpu ram platten netz energie ping todo
 breite = 220
 zoom = 100
 anzeige_sekunden = 3
@@ -215,6 +216,8 @@ pub struct Settings {
     pub vollbild_zeigen: bool,
     /// Farben fuer Termin, Urlaub, Geburtstag
     pub farben_termine: [u32; 3],
+    /// eigene Datei der Todo-Liste (leer = todo.txt neben der ini)
+    pub todo_datei: String,
 }
 
 #[derive(Clone)]
@@ -258,6 +261,7 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
         kalender: Vec::new(),
         vollbild_zeigen: false,
         farben_termine: [FARBE_TERMIN, FARBE_URLAUB, FARBE_GEBURTSTAG],
+        todo_datei: String::new(),
     };
     let (mut pos_x, mut pos_y) = (None, None);
     let (mut color, mut accent) = (String::from("gruen"), None);
@@ -317,6 +321,7 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
                 "farbe_urlaub" => s.farben_termine[1] = parse_hex(v).unwrap_or(FARBE_URLAUB),
                 "farbe_geburtstag" => s.farben_termine[2] = parse_hex(v).unwrap_or(FARBE_GEBURTSTAG),
                 "vollbild_zeigen" => s.vollbild_zeigen = v == "1",
+                "todo_datei" => s.todo_datei = v.to_string(),
                 "energie_auto" => s.power_auto = v == "1",
                 "plan_spiel" if crate::power::parse_guid(v).is_some() => s.plan_game = v.to_lowercase(),
                 "plan_normal" if crate::power::parse_guid(v).is_some() => s.plan_normal = v.to_lowercase(),

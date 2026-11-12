@@ -25,6 +25,7 @@ mod power;
 mod startmenue;
 mod stats;
 mod termine;
+mod todo;
 
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
@@ -181,6 +182,7 @@ unsafe fn show_menu(hwnd: HWND) {
             "ram" => "RAM",
             "platten" => "Platten",
             "netz" => "Netz",
+            "todo" => "Todo-Liste",
             _ => "Ping",
         };
         let grau = if *m == "gpu" && !gpu_da { MF_GRAYED } else { 0 };
@@ -346,7 +348,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_LBUTTONUP => {
-            with_app(|a| {
+            let editor = with_app(|a| {
                 let dragged = a.drag.take().is_some() && a.dragging;
                 a.dragging = false;
                 ReleaseCapture();
@@ -361,6 +363,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     a.ignore_up = false;
                 } else {
                     match a.hit_at(mouse_y) {
+                        Some(Hit::Todo(i)) => return a.todo_klick(i, mouse_x),
                         Some(Hit::Ping(i)) => a.toggle_graph(i),
                         Some(Hit::Power) => a.toggle_plan(),
                         Some(Hit::Uhr) => {
@@ -372,7 +375,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         _ => {}
                     }
                 }
-            });
+                None
+            })
+            .flatten();
+            // Editor erst hier: er ruft beim Schliessen selbst with_app auf
+            if let Some((r, datei, scale, fg, dim)) = editor {
+                todo::bearbeiten(r, datei, scale, fg, dim);
+            }
             0
         }
         WM_CAPTURECHANGED => {
@@ -399,6 +408,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     }
                     Hit::Disk(i) => format!("explorer.exe {}", a.stats.disks.get(i)?.root),
                     Hit::Cpu | Hit::Gpu | Hit::Ram | Hit::Net => "taskmgr.exe".to_string(),
+                    // Doppelklick aufs Kaestchen soll nur einmal abhaken
+                    Hit::Todo(_) => {
+                        a.ignore_up = true;
+                        return None;
+                    }
                     Hit::Power => {
                         a.toggle_plan(); // ersten Klick des Doppelklicks rueckgaengig machen
                         "control.exe powercfg.cpl".to_string()
@@ -517,7 +531,7 @@ fn main() {
         let cfg_path = config::ini_pfad();
         let mut app = App::new(hwnd, scale, font, cfg_path);
         app.load_config(); // startet auch den Mess-Timer
-        app.stats.sample();
+        app.stats.sample(None);
         app.update_visibility();
         app::install(app);
 
