@@ -56,7 +56,9 @@ pub const DEFAULT_SETTINGS: &str = "\
 # timeout        = ms bis \"TIMED OUT\"
 # graph_max      = ms, die der Ping-Graph als Obergrenze zeigt
 # gelb / rot     = Prozent, ab denen CPU, RAM und Platten gelb bzw. rot werden
-# hintergrund    = Deckkraft eines dunklen Hintergrunds, 0 (durchsichtig) bis 255
+# hintergrund    = Deckkraft des Hintergrunds, 0 (durchsichtig) bis 255
+# hintergrund_farbe = Farbe des Hintergrunds als RRGGBB, Standard 000000 (schwarz)
+# version        = 1: Versionsnummer als eigene Zeile ganz oben, 0 = aus
 # rand_rechts / rand_oben = Abstand zum Bildschirmrand, solange nicht verschoben
 # pos_x / pos_y  = Position nach dem Verschieben (Menue \"Position zuruecksetzen\" = wieder oben rechts)
 # gesperrt       = 1 verhindert Verschieben mit der Maus
@@ -82,6 +84,8 @@ graph_max = 500
 gelb = 80
 rot = 90
 hintergrund = 0
+hintergrund_farbe = 000000
+version = 1
 rand_rechts = 0
 rand_oben = 0
 gesperrt = 0
@@ -92,6 +96,49 @@ plan_spiel = 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
 plan_normal = 381b4222-f694-41f0-9685-ff5bb260df2e
 spiele = r5apex r5apex_dx12
 ";
+
+/// Prozent -> Alpha 0..255
+pub fn prozent_alpha(p: u32) -> u8 {
+    ((p.min(100) * 255 + 50) / 100) as u8
+}
+
+/// Farbton 0..359, Saettigung und Helligkeit 0..100 -> RRGGBB
+pub fn hsv_rgb(h: u32, s: u32, v: u32) -> u32 {
+    let (s, v) = (s.min(100) as f32 / 100.0, v.min(100) as f32 / 100.0);
+    let c = v * s;
+    let hp = (h % 360) as f32 / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r, g, b) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    let k = |f: f32| ((f + m) * 255.0).round() as u32;
+    (k(r) << 16) | (k(g) << 8) | k(b)
+}
+
+/// RRGGBB -> (Farbton 0..359, Saettigung 0..100, Helligkeit 0..100)
+pub fn rgb_hsv(c: u32) -> (u32, u32, u32) {
+    let f = |sh: u32| ((c >> sh) & 255) as f32 / 255.0;
+    let (r, g, b) = (f(16), f(8), f(0));
+    let max = r.max(g).max(b);
+    let d = max - r.min(g).min(b);
+    let h = if d == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    let s = if max == 0.0 { 0.0 } else { d / max };
+    (h.round() as u32 % 360, (s * 100.0).round() as u32, (max * 100.0).round() as u32)
+}
 
 /// Standardfarben der Terminarten: Termin blau, Urlaub hellorange, Geburtstag pink.
 pub const FARBE_TERMIN: u32 = 0x6CB8FF;
@@ -147,6 +194,10 @@ pub struct Settings {
     pub yellow: f32,
     pub red: f32,
     pub bg: u8,
+    /// Farbe des Hintergrunds (RRGGBB)
+    pub bg_farbe: u32,
+    /// Versionszeile ganz oben
+    pub version_zeigen: bool,
     pub margin_right: i32,
     pub margin_top: i32,
     pub pos: Option<(i32, i32)>,
@@ -190,6 +241,8 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
         yellow: 80.0,
         red: 90.0,
         bg: 0,
+        bg_farbe: 0,
+        version_zeigen: true,
         margin_right: 0,
         margin_top: 0,
         pos: None,
@@ -251,6 +304,8 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
                 "gelb" => s.yellow = v.parse().unwrap_or(80.0),
                 "rot" => s.red = v.parse().unwrap_or(90.0),
                 "hintergrund" => s.bg = v.parse::<u32>().unwrap_or(0).min(255) as u8,
+                "hintergrund_farbe" => s.bg_farbe = parse_hex(v).unwrap_or(0),
+                "version" => s.version_zeigen = v != "0",
                 "rand_rechts" => s.margin_right = v.parse().unwrap_or(0),
                 "rand_oben" => s.margin_top = v.parse().unwrap_or(0),
                 "pos_x" => pos_x = v.parse::<i32>().ok(),
@@ -317,6 +372,21 @@ mod kalender_tests {
     use super::*;
 
     #[test]
+    fn hsv_hin_und_zurueck() {
+        assert_eq!(hsv_rgb(0, 100, 100), 0xFF0000);
+        assert_eq!(hsv_rgb(120, 100, 100), 0x00FF00);
+        assert_eq!(hsv_rgb(0, 0, 0), 0x000000);
+        assert_eq!(rgb_hsv(0x0000FF), (240, 100, 100));
+        for c in [0x22262Bu32, 0x0E1A2E, 0x808080, 0xFFFFFF, 0x2A1012] {
+            let (h, s, v) = rgb_hsv(c);
+            let z = hsv_rgb(h, s, v);
+            for sh in [16, 8, 0] {
+                assert!((((c >> sh) & 255) as i32 - ((z >> sh) & 255) as i32).abs() <= 3, "{c:06X} -> {z:06X}");
+            }
+        }
+    }
+
+    #[test]
     fn kalenderzeilen() {
         let (s, hosts) = parse_config("kalender = Bday | geburtstag | 1 | https://x/a?b=c|d
 kalender = Ferien | urlaub | 0 | ferien.ics
@@ -328,6 +398,7 @@ A | 1.1.1.1
         assert_eq!(s.kalender[0].quelle, "https://x/a?b=c|d");
         assert_eq!(s.kalender[0].art, Art::Geburtstag);
         assert!(s.kalender[0].an && !s.kalender[1].an);
+        assert!(s.version_zeigen && s.bg_farbe == 0);
         assert_eq!(s.kalender[1].line, 1);
         assert_eq!(s.farben_termine, [FARBE_TERMIN, 0x112233, FARBE_GEBURTSTAG]);
     }

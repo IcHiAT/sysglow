@@ -20,6 +20,7 @@ mod gpu;
 mod installer;
 mod kalender;
 mod ping;
+mod schieber;
 mod power;
 mod startmenue;
 mod stats;
@@ -60,6 +61,8 @@ const MENU_RESETPOS: usize = 7;
 const MENU_POWER_AUTO: usize = 8;
 const MENU_STARTMENUE: usize = 9;
 const MENU_CPUTEMP: usize = 10;
+const MENU_VERSION: usize = 11;
+const MENU_BG: usize = 12;
 const MENU_COLOR: usize = 200; // + Index in THEMES
 const MENU_MODULE: usize = 100; // + Index in KNOWN_MODULES
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -156,8 +159,9 @@ fn shell_open(cmd: &str) {
 
 // ---------------------------------------------------------------- Menue
 unsafe fn show_menu(hwnd: HWND) {
-    let Some((hidden, locked, modules, power_auto, color, gpu_da, temp_an)) = with_app(|a| {
-        (a.user_hidden, a.settings.locked, a.settings.modules.clone(), a.settings.power_auto, a.settings.color.clone(), a.gpu.is_some(), a.cputemp.aktiv())
+    let Some((hidden, locked, modules, power_auto, color, gpu_da, temp_an, version)) = with_app(|a| {
+        let s = &a.settings;
+        (a.user_hidden, s.locked, s.modules.clone(), s.power_auto, s.color.clone(), a.gpu.is_some(), a.cputemp.aktiv(), s.version_zeigen)
     })
     else {
         return;
@@ -182,6 +186,8 @@ unsafe fn show_menu(hwnd: HWND) {
         let grau = if *m == "gpu" && !gpu_da { MF_GRAYED } else { 0 };
         AppendMenuW(sub, MF_STRING | grau | check(modules.iter().any(|x| x == m)), MENU_MODULE + i, wide(label).as_ptr());
     }
+    AppendMenuW(sub, MF_SEPARATOR, 0, null());
+    AppendMenuW(sub, MF_STRING | check(version), MENU_VERSION, wide("Version").as_ptr());
     let colors = CreatePopupMenu();
     for (i, t) in THEMES.iter().enumerate() {
         let mut label = t.0.replace("ue", "ü").replace("ss", "ß");
@@ -192,6 +198,7 @@ unsafe fn show_menu(hwnd: HWND) {
     AppendMenuW(menu, MF_STRING, MENU_TOGGLE, wide(if hidden { "Einblenden" } else { "Ausblenden" }).as_ptr());
     AppendMenuW(menu, MF_POPUP, sub as usize, wide("Elemente").as_ptr());
     AppendMenuW(menu, MF_POPUP, colors as usize, wide("Farbe").as_ptr());
+    AppendMenuW(menu, MF_STRING, MENU_BG, wide("Hintergrund …").as_ptr());
     AppendMenuW(menu, MF_STRING | check(power_auto), MENU_POWER_AUTO, wide("Energieplan bei Spielen umschalten").as_ptr());
     AppendMenuW(menu, MF_STRING | check(temp_an), MENU_CPUTEMP, wide("CPU-Temperatur lesen (einmal Admin)").as_ptr());
     AppendMenuW(menu, MF_STRING | check(locked), MENU_LOCK, wide("Position sperren").as_ptr());
@@ -252,6 +259,10 @@ unsafe fn show_menu(hwnd: HWND) {
             EXITING.store(true, Relaxed);
             DestroyWindow(hwnd);
         }
+        MENU_VERSION => {
+            with_app(|a| a.toggle_version());
+        }
+        MENU_BG => schieber::oeffnen(),
         c if (MENU_COLOR..MENU_COLOR + THEMES.len()).contains(&c) => {
             with_app(|a| a.set_color(THEMES[c - MENU_COLOR].0));
         }

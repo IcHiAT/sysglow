@@ -105,7 +105,7 @@ fn seg_dist(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
 }
 
 /// Setzt das Bild zusammen: Hintergrund, Grafik, Text mit dunkler Kontur.
-pub unsafe fn compose(text_s: &Surface, out_s: &Surface, w: i32, h: i32, bg: u8, scale: f32, dr: &[Draw], ops: &[TextOp]) {
+pub unsafe fn compose(text_s: &Surface, out_s: &Surface, w: i32, h: i32, bg: u8, bg_farbe: u32, scale: f32, dr: &[Draw], ops: &[TextOp]) {
     let n = (w * h) as usize;
     let text = std::slice::from_raw_parts_mut(text_s.bits, n);
     let out = std::slice::from_raw_parts_mut(out_s.bits, n);
@@ -123,7 +123,10 @@ pub unsafe fn compose(text_s: &Surface, out_s: &Surface, w: i32, h: i32, bg: u8,
     GdiFlush();
 
     // 2) Hintergrund: mindestens Alpha 1, damit das Fenster Mausereignisse bekommt
-    out.fill((bg.max(1) as u32) << 24);
+    // Farbe vormultipliziert (Kanal x Alpha / 255)
+    let a = bg.max(1) as u32;
+    let ch = |sh: u32| ((bg_farbe >> sh) & 255) * a / 255;
+    out.fill((a << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0));
 
     // 3) Grafik
     for d in dr {

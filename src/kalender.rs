@@ -322,7 +322,7 @@ impl Kal {
             if self.text.bits.is_null() || self.out.bits.is_null() {
                 return;
             }
-            compose(&self.text, &self.out, w, h, DECKKRAFT, self.scale, &dr, &ops);
+            compose(&self.text, &self.out, w, h, DECKKRAFT, 0, self.scale, &dr, &ops);
             let size = SIZE { cx: w, cy: h };
             let src = POINT { x: 0, y: 0 };
             let bf = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };

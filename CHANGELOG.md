@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1 (12.11.2026)
+
+- Neu: Die Versionsnummer steht als eigene Zeile ganz oben (`Sysglow v0.8.1`). Abschalten unter Rechtsklick → *Elemente* → *Version* oder `version = 0` in der ini.
+- Neu: Rechtsklick → *Hintergrund …* öffnet ein kleines Fenster mit vier Schiebern: Farbton, Sättigung, Helligkeit und Deckkraft. Das Widget zeigt jede Änderung sofort; Mausrad über einem Schieber stellt fein ein, Esc schließt. Gespeichert wird in der ini als `hintergrund_farbe` (RRGGBB) und `hintergrund` (0–255).
+
 ## 0.8.0 (12.11.2026)
 
 - Neu: Termine im Kalender-Popup. Quellen sind Google-Kalender (geheime iCal-Adresse) oder .ics-Dateien, eine `kalender =`-Zeile je Quelle, nur lesen. Urlaub färbt den Tag hellorange, Termine bekommen einen blauen Strich, Geburtstage sind pink mit wackelndem Luftballon. Unter dem Monat steht eine Liste (Wiederholungen als Einzeltage, z. B. 3./10./17., bis 8 Einträge). Neu geladen wird alle 30 Minuten, nach einem Fehler nach 60 s.

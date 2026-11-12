@@ -28,6 +28,8 @@ Klick auf das Datum öffnet den Kalender:
 - **Energieplan automatisch**: Startet ein Spiel (Prozess aus `spiele` oder Direct3D-Vollbild), schaltet glow auf `plan_spiel` (Höchstleistung); ist das Spiel beendet, zurück auf `plan_normal` (Ausbalanciert). Umgeschaltet wird nur beim Wechsel – wer zwischendurch von Hand umstellt, wird nicht überstimmt. Funktioniert auch, wenn das Element `energie` ausgeblendet ist; abschalten mit `energie_auto = 0` oder im Menü.
 - **CPU-Temperatur** (optional): Windows gibt sie nur mit Adminrechten heraus. Rechtsklick → *CPU-Temperatur lesen (einmal Admin)* fragt einmal nach Adminrechten und legt die Aufgabe *Sysglow CPU-Temperatur* in der Aufgabenplanung an. Danach startet Sysglow den erhöhten Teil (`Sysglow.exe --temp`) selbst ohne Abfrage; er liest die Temperatur alle 2 s über den [PawnIO](https://pawnio.eu)-Treiber, denselben Weg wie LibreHardwareMonitor und FanControl, und beendet sich mit der Anzeige. Voraussetzung: PawnIO ist installiert (kommt z. B. mit FanControl mit oder einzeln von pawnio.eu). Intel ab Core 2 und AMD Ryzen (Zen); AMD ist ungetestet. Noch einmal klicken entfernt die Aufgabe. Ohne Einrichtung steht dort `–°C`.
 - **Farben**: Rechtsklick → *Farbe* (grün, cyan, blau, lila, amber, rot, weiß) oder eigene Farbe als `RRGGBB` in der ini
+- **Hintergrund**: Rechtsklick → *Hintergrund …* öffnet Schieber für Farbton, Sättigung, Helligkeit und Deckkraft; das Widget ändert sich sofort mit
+- Versionsnummer als eigene Zeile ganz oben, abschaltbar unter *Elemente* → *Version*
 - Liegt nur auf dem Desktop (unter allen Fenstern), blendet sich bei Vollbild und Spielen aus
 - Tray-Icon, verschiebbar per Maus, Position wird gespeichert
 - Hover zeigt Details (freier Platz, IP-Adresse), Klick auf einen Ping schaltet dessen Graph
@@ -71,7 +73,9 @@ Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach
 | `timeout` | ms bis „TIMED OUT“ | 3000 |
 | `graph_max` | Obergrenze des Ping-Graphen in ms | 500 |
 | `gelb` / `rot` | Prozent-Schwellen für CPU, RAM, Platten | 80 / 90 |
-| `hintergrund` | Deckkraft des dunklen Hintergrunds 0–255 | 0 |
+| `hintergrund` | Deckkraft des Hintergrunds 0–255 (0 = durchsichtig) | 0 |
+| `hintergrund_farbe` | Farbe des Hintergrunds als `RRGGBB` | 000000 |
+| `version` | Versionsnummer als eigene Zeile oben (1/0) | 1 |
 | `rand_rechts` / `rand_oben` | Abstand zum Rand, solange nicht verschoben | 0 |
 | `pos_x` / `pos_y` | gespeicherte Position | – |
 | `gesperrt` | 1 = nicht verschiebbar | 0 |

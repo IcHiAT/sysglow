@@ -421,6 +421,26 @@ impl App {
         self.render();
     }
 
+    /// Hintergrund: Farbe und/oder Deckkraft setzen. Neue Farbe bei unsichtbarem Hintergrund -> 60 %.
+    pub fn set_hintergrund(&mut self, farbe: Option<u32>, alpha: Option<u8>) {
+        let alpha = alpha.or_else(|| (farbe.is_some() && self.settings.bg == 0).then(|| crate::config::prozent_alpha(60)));
+        if let Some(c) = farbe {
+            self.set_key("hintergrund_farbe", &format!("{c:06X}"));
+        }
+        if let Some(a) = alpha {
+            self.set_key("hintergrund", &a.to_string());
+        }
+        self.load_config();
+        self.render();
+    }
+
+    pub fn toggle_version(&mut self) {
+        let an = !self.settings.version_zeigen;
+        self.set_key("version", if an { "1" } else { "0" });
+        self.load_config();
+        self.render();
+    }
+
     pub fn toggle_module(&mut self, m: &str) {
         self.settings.modules = toggle_module(&self.settings.modules, m);
         let v = self.settings.modules.join(" ");
@@ -737,8 +757,17 @@ impl App {
 
         // Elemente ohne Daten (GPU nicht erkannt) ganz weglassen, auch ohne Trennlinie
         let modules: Vec<&String> = self.settings.modules.iter().filter(|m| *m != "gpu" || self.gpu.is_some()).collect();
+        // Versionsnummer als eigene Zeile ganz oben, mittig und gedaempft
+        let version = self.settings.version_zeigen;
+        if version {
+            let v = concat!("Sysglow v", env!("CARGO_PKG_VERSION"));
+            let vw = self.measure(v).min(f.inner);
+            let inner = f.inner;
+            self.put(&mut f, v, (w - vw) / 2, false, inner, self.settings.dim);
+            f.y += f.rh;
+        }
         for (mi, m) in modules.into_iter().enumerate() {
-            if mi > 0 {
+            if mi > 0 || version {
                 let sh = self.px(SEP_H);
                 f.dr.push(Draw::Fill(rect(pad, f.y + sh / 2, w - pad, f.y + sh / 2 + 1), self.settings.dim, 0.5));
                 f.y += sh;
@@ -767,7 +796,7 @@ impl App {
             if self.text.bits.is_null() || self.out.bits.is_null() {
                 return;
             }
-            compose(&self.text, &self.out, w, h, self.settings.bg, self.scale, &f.dr, &f.ops);
+            compose(&self.text, &self.out, w, h, self.settings.bg, self.settings.bg_farbe, self.scale, &f.dr, &f.ops);
 
             // Eigene Position oder oben rechts, immer im sichtbaren Bereich
             let pos = match self.settings.pos {
