@@ -282,6 +282,7 @@ impl App {
             self.hosts.push(host);
         }
         unsafe { SetTimer(self.hwnd, 1, (settings.refresh * 1000) as u32, None) };
+        crate::termine::quellen_setzen(&settings.kalender);
         self.settings = settings;
         self.hover = None;
         self.zoom_anwenden();
@@ -430,7 +431,7 @@ impl App {
 
     // ------------------------------------------------------------ Ablauf
     pub fn update_visibility(&mut self) {
-        let vis = !self.user_hidden && !fullscreen_active();
+        let vis = !self.user_hidden && (self.settings.vollbild_zeigen || !fullscreen_active());
         if vis != self.visible {
             self.visible = vis;
             if vis {

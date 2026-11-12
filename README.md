@@ -33,6 +33,7 @@ Klick auf das Datum öffnet den Kalender:
 - Hover zeigt Details (freier Platz, IP-Adresse), Klick auf einen Ping schaltet dessen Graph
 - Hover auf einen Graphen (CPU, GPU, Netz, Ping) zeigt Uhrzeit und Wert dieser Messung
 - Klick auf Datum oder Uhrzeit öffnet den Kalender links neben dem Widget: `<` `>`, Mausrad oder Pfeiltasten wechseln den Monat, Klick auf den Titel springt zu heute, Esc oder Klick daneben schließt
+- **Termine im Kalender** aus Google-Kalendern oder .ics-Dateien (nur lesen): Urlaub hellorange hinterlegt, Termine blau unterstrichen, Geburtstage pink mit Luftballon; Liste der Einträge unter dem Monat. Das Popup lässt sich verschieben, Rechtsklick darauf schaltet einzelne Kalender an/aus oder lädt neu
 - Doppelklick: CPU/GPU/RAM/Netz → Task-Manager, Laufwerk → Explorer, Ping → eigener Befehl
 - ini wird beim Speichern automatisch neu geladen
 - Sehr sparsam: ca. 770 KB exe, ca. 18 MB RAM, kaum CPU
@@ -79,6 +80,8 @@ Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach
 | `energie_auto` | 1 = Energieplan bei Spielstart/-ende umschalten | 1 |
 | `plan_spiel` / `plan_normal` | GUIDs aus `powercfg /list` | Höchstleistung / Ausbalanciert |
 | `spiele` | Prozessnamen ohne `.exe`, Leerzeichen getrennt | `r5apex r5apex_dx12` |
+| `farbe_termin` / `farbe_urlaub` / `farbe_geburtstag` | Farben `RRGGBB` der Termine | 6CB8FF / FFB070 / FF7EC8 |
+| `vollbild_zeigen` | 1 = bei Vollbild nicht ausblenden (zum Testen) | 0 |
 
 Ping-Hosts, eine Zeile pro Host:
 
@@ -86,6 +89,14 @@ Ping-Hosts, eine Zeile pro Host:
 # Name | Adresse | gelb ab ms | rot ab ms | Graph 0/1 | Doppelklick-Befehl (optional)
 Router     | 192.168.1.1 | 40 | 80 | 0 | cmd.exe
 Google     | 8.8.8.8     | 40 | 80 | 1
+```
+
+Kalender, eine Zeile pro Quelle. Art: `termin`, `urlaub` oder `geburtstag`. Quelle: https/webcal-Adresse (bei Google: Kalendereinstellungen → *Geheime Adresse im iCal-Format*) oder Pfad zu einer .ics-Datei:
+
+```
+# kalender = Name | Art | an 0/1 | Adresse oder Datei
+kalender = Feiertage | termin     | 1 | https://calendar.google.com/calendar/ical/de.german%23holiday%40group.v.calendar.google.com/public/basic.ics
+kalender = Bday      | geburtstag | 1 | <geheime Adresse>
 ```
 
 ## Bauen

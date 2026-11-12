@@ -65,6 +65,13 @@ pub const DEFAULT_SETTINGS: &str = "\
 # energie_auto   = 1: beim Start eines Spiels auf plan_spiel, nach dem Beenden auf plan_normal schalten
 # plan_spiel / plan_normal = GUID des Energieplans (powercfg /list), Standard Hoechstleistung / Ausbalanciert
 # spiele         = Prozessnamen ohne .exe, mit Leerzeichen getrennt; Direct3D-Vollbild zaehlt immer als Spiel
+# vollbild_zeigen = 1: auch ueber Vollbild-Programmen sichtbar bleiben (zum Testen), Standard 0 = ausblenden
+# farbe_termin / farbe_urlaub / farbe_geburtstag = Farben der Termine im Kalender als RRGGBB
+#
+# Termine im Kalender (Klick aufs Datum), eine Zeile je Kalender, nur lesen:
+# kalender = Name | Art (termin, urlaub, geburtstag) | 1 = an, 0 = aus | https-Adresse oder .ics-Datei
+# Google: Kalender-Einstellungen > \"Geheime Adresse im iCal-Format\" kopieren. Diese Adresse nicht weitergeben.
+# kalender = Geburtstage | geburtstag | 1 | https://calendar.google.com/calendar/ical/.../basic.ics
 module = kopf uhr cpu gpu ram platten netz energie ping
 breite = 220
 zoom = 100
@@ -85,6 +92,40 @@ plan_spiel = 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
 plan_normal = 381b4222-f694-41f0-9685-ff5bb260df2e
 spiele = r5apex r5apex_dx12
 ";
+
+/// Standardfarben der Terminarten: Termin blau, Urlaub hellorange, Geburtstag pink.
+pub const FARBE_TERMIN: u32 = 0x6CB8FF;
+pub const FARBE_URLAUB: u32 = 0xFFB070;
+pub const FARBE_GEBURTSTAG: u32 = 0xFF7EC8;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Art {
+    Termin,
+    Urlaub,
+    Geburtstag,
+}
+
+/// Eine Zeile "kalender = Name | Art | an | Quelle".
+#[derive(Clone, PartialEq, Debug)]
+pub struct KalQuelle {
+    pub name: String,
+    pub art: Art,
+    pub an: bool,
+    pub quelle: String,
+    /// Zeilennummer in der ini (zum Umschalten an/aus)
+    pub line: usize,
+}
+
+pub fn parse_kalender(v: &str, line: usize) -> Option<KalQuelle> {
+    let p: Vec<&str> = v.splitn(4, '|').map(str::trim).collect();
+    let quelle = p.get(3).filter(|q| !q.is_empty())?;
+    let art = match p.get(1).map(|a| a.to_lowercase()).as_deref() {
+        Some("urlaub") => Art::Urlaub,
+        Some("geburtstag" | "geburtstage" | "bday") => Art::Geburtstag,
+        _ => Art::Termin,
+    };
+    Some(KalQuelle { name: p[0].to_string(), art, an: p.get(2).is_none_or(|a| *a != "0"), quelle: quelle.to_string(), line })
+}
 
 pub const DEFAULT_HOSTS: &str = "\
 # Name | Adresse (IP oder Hostname) | gelb ab ms | rot ab ms | Graph 0/1 | Doppelklick-Befehl (optional)
@@ -118,6 +159,11 @@ pub struct Settings {
     pub plan_game: String,
     pub plan_normal: String,
     pub games: Vec<String>,
+    pub kalender: Vec<KalQuelle>,
+    /// auch bei Vollbild-Programmen sichtbar bleiben
+    pub vollbild_zeigen: bool,
+    /// Farben fuer Termin, Urlaub, Geburtstag
+    pub farben_termine: [u32; 3],
 }
 
 #[derive(Clone)]
@@ -156,6 +202,9 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
         plan_game: crate::power::PLAN_HIGH.into(),
         plan_normal: crate::power::PLAN_BALANCED.into(),
         games: vec!["r5apex".into(), "r5apex_dx12".into()],
+        kalender: Vec::new(),
+        vollbild_zeigen: false,
+        farben_termine: [FARBE_TERMIN, FARBE_URLAUB, FARBE_GEBURTSTAG],
     };
     let (mut pos_x, mut pos_y) = (None, None);
     let (mut color, mut accent) = (String::from("gruen"), None);
@@ -165,7 +214,9 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
         if l.is_empty() || l.starts_with('#') || l.starts_with(';') {
             continue;
         }
-        if l.contains('|') {
+        if let Some(v) = l.split_once('=').filter(|(k, _)| k.trim().eq_ignore_ascii_case("kalender")).map(|(_, v)| v) {
+            s.kalender.extend(parse_kalender(v, i));
+        } else if l.contains('|') {
             let p: Vec<&str> = l.split('|').map(str::trim).collect();
             if p.len() < 2 || p[1].is_empty() {
                 continue;
@@ -207,6 +258,10 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
                 "gesperrt" => s.locked = v == "1",
                 "farbe" => color = v.to_lowercase(),
                 "akzent" => accent = parse_hex(v),
+                "farbe_termin" => s.farben_termine[0] = parse_hex(v).unwrap_or(FARBE_TERMIN),
+                "farbe_urlaub" => s.farben_termine[1] = parse_hex(v).unwrap_or(FARBE_URLAUB),
+                "farbe_geburtstag" => s.farben_termine[2] = parse_hex(v).unwrap_or(FARBE_GEBURTSTAG),
+                "vollbild_zeigen" => s.vollbild_zeigen = v == "1",
                 "energie_auto" => s.power_auto = v == "1",
                 "plan_spiel" if crate::power::parse_guid(v).is_some() => s.plan_game = v.to_lowercase(),
                 "plan_normal" if crate::power::parse_guid(v).is_some() => s.plan_normal = v.to_lowercase(),
@@ -255,6 +310,27 @@ pub fn toggle_module(modules: &[String], m: &str) -> Vec<String> {
     let mut v = modules.to_vec();
     v.insert(at, m.to_string());
     v
+}
+
+#[cfg(test)]
+mod kalender_tests {
+    use super::*;
+
+    #[test]
+    fn kalenderzeilen() {
+        let (s, hosts) = parse_config("kalender = Bday | geburtstag | 1 | https://x/a?b=c|d
+kalender = Ferien | urlaub | 0 | ferien.ics
+farbe_urlaub = 112233
+A | 1.1.1.1
+");
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(s.kalender.len(), 2);
+        assert_eq!(s.kalender[0].quelle, "https://x/a?b=c|d");
+        assert_eq!(s.kalender[0].art, Art::Geburtstag);
+        assert!(s.kalender[0].an && !s.kalender[1].an);
+        assert_eq!(s.kalender[1].line, 1);
+        assert_eq!(s.farben_termine, [FARBE_TERMIN, 0x112233, FARBE_GEBURTSTAG]);
+    }
 }
 
 #[cfg(test)]

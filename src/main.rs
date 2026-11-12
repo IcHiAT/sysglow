@@ -23,6 +23,7 @@ mod ping;
 mod power;
 mod startmenue;
 mod stats;
+mod termine;
 
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
@@ -355,7 +356,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             let mut rc = zeroed::<RECT>();
                             GetWindowRect(hwnd, &mut rc);
                             let st = &a.settings;
-                            kalender::umschalten(rc, a.font, a.scale, st.fg, st.dim, st.accent);
+                            kalender::umschalten(rc, a.font, a.scale, st);
                         }
                         _ => {}
                     }

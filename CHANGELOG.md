@@ -1,7 +1,11 @@
 # Changelog
 
-## Unveröffentlicht
+## 0.8.0 (12.11.2026)
 
+- Neu: Termine im Kalender-Popup. Quellen sind Google-Kalender (geheime iCal-Adresse) oder .ics-Dateien, eine `kalender =`-Zeile je Quelle, nur lesen. Urlaub färbt den Tag hellorange, Termine bekommen einen blauen Strich, Geburtstage sind pink mit wackelndem Luftballon. Unter dem Monat steht eine Liste (Wiederholungen als Einzeltage, z. B. 3./10./17., bis 8 Einträge). Neu geladen wird alle 30 Minuten, nach einem Fehler nach 60 s.
+- Neu: Kalender-Popup ist verschiebbar (überall außer der Kopfzeile ziehen). Rechtsklick darauf schaltet Kalender an/aus und lädt neu.
+- Neu: `farbe_termin`, `farbe_urlaub`, `farbe_geburtstag` in der ini.
+- Neu (Test): `vollbild_zeigen = 1` lässt Sysglow bei Vollbild sichtbar.
 - Neu: Maus aufs Widget und `+` oder `-` drücken macht Sysglow größer oder kleiner (5er-Schritte, 50–300 %). Die Größe steht als `zoom` in der `sysglow.ini` und gilt nach dem Neustart weiter. Der Kalender wächst mit.
 
 ## 0.7.0 (10.11.2026)
