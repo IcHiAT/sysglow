@@ -32,6 +32,7 @@ Klick auf das Datum öffnet den Kalender:
 - **Hintergrund**: Rechtsklick → *Hintergrund …* öffnet Schieber für Farbton, Sättigung, Helligkeit und Deckkraft; das Widget ändert sich sofort mit
 - Versionsnummer als eigene Zeile ganz oben, abschaltbar unter *Elemente* → *Version*
 - Liegt nur auf dem Desktop (unter allen Fenstern), blendet sich bei Vollbild und Spielen aus
+- **Autoupdate**: Sysglow prüft täglich auf GitHub nach einer neuen Version (eine verpasste Prüfung holt es beim Start nach), lädt sie, prüft die Prüfsumme und installiert sie, sobald kein Vollbild läuft und eine Minute niemand Maus oder Tastatur benutzt. Rechtsklick → *Nach Update suchen* prüft sofort; der Haken *Autoupdate* schaltet das automatische Installieren ab
 - Tray-Icon, verschiebbar per Maus, Position wird gespeichert
 - Hover zeigt Details (freier Platz, IP-Adresse), Klick auf einen Ping schaltet dessen Graph
 - Hover auf einen Graphen (CPU, GPU, Netz, Ping) zeigt Uhrzeit und Wert dieser Messung, bei CPU und GPU auch Takt und Temperatur
@@ -88,6 +89,8 @@ Das Skript holt die neueste `Sysglow.exe`, prüft ihre Prüfsumme, legt sie nach
 | `farbe_termin` / `farbe_urlaub` / `farbe_geburtstag` | Farben `RRGGBB` der Termine | 6CB8FF / FFB070 / FF7EC8 |
 | `vollbild_zeigen` | 1 = bei Vollbild nicht ausblenden (zum Testen) | 0 |
 | `todo_datei` | Datei der Todo-Liste, absolut oder relativ zur ini | `todo.txt` neben der ini |
+| `update_auto` | 1 = Updates selbst installieren (Menü: *Autoupdate*) | 1 |
+| `update_geprueft` | Zeitpunkt der letzten Update-Prüfung (wird selbst gesetzt) | – |
 
 Ping-Hosts, eine Zeile pro Host:
 
@@ -130,6 +133,7 @@ Ergebnis: `target\release\sysglow.exe`.
 | `src/power.rs` | Energieplan lesen/setzen, laufende Spiele erkennen |
 | `src/kalender.rs` | Kalender-Popup |
 | `src/todo.rs` | Todo-Datei lesen, abhaken, Zeilenumbruch, Editor-Fenster |
+| `src/update.rs` | Autoupdate: GitHub-Release prüfen, exe laden, Prüfsumme, exe tauschen |
 | `src/gfx.rs` | Zeichnen (Text mit Kontur, Balken, Graphen), Tray-Icon |
 
 Ein neues Element: Namen in `KNOWN_MODULES` (`config.rs`) eintragen, `el_<name>` in `app.rs` schreiben und in `render()` zuordnen, Menütext in `show_menu()` (`main.rs`) ergänzen.

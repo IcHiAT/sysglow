@@ -171,6 +171,16 @@ fn notification_state() -> i32 {
     }
 }
 
+/// Millisekunden seit der letzten Eingabe an diesem PC
+fn leerlauf_ms() -> u32 {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut li = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    if unsafe { GetLastInputInfo(&mut li) } == 0 {
+        return 0;
+    }
+    unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount() }.wrapping_sub(li.dwTime)
+}
+
 fn fullscreen_active() -> bool {
     matches!(notification_state(), 2..=4)
 }
@@ -317,6 +327,13 @@ impl App {
         unsafe { SetTimer(self.hwnd, 1, (settings.refresh * 1000) as u32, None) };
         crate::termine::quellen_setzen(&settings.kalender);
         self.settings = settings;
+        if !self.settings.module_neu.is_empty() {
+            // neue Elemente einmal in die ini schreiben, danach gelten sie als bekannt
+            let v = self.settings.modules.join(" ");
+            self.set_key("module", &v);
+            self.set_key("module_bekannt", &crate::config::module_bekannt());
+            self.cfg_mtime = mtime(&self.cfg_path);
+        }
         self.hover = None;
         self.zoom_anwenden();
         self.todo_laden();
@@ -363,6 +380,30 @@ impl App {
     }
 
     /// Setzt "key = val" in der ini; fehlt die Zeile, wird sie nach der letzten Einstellung eingefuegt.
+    /// Nach einem Update einmal das Fenster mit den Neuerungen zeigen. Es laeuft als eigener Prozess
+    /// (`--changelog ALT`), damit das Widget sofort weiterlaeuft. Bei einer neuen ini (Erstinstallation)
+    /// wird nur die Version gemerkt.
+    pub fn changelog_pruefen(&mut self, neue_ini: bool) {
+        let jetzt = env!("CARGO_PKG_VERSION");
+        let alt = self.settings.version_gesehen.clone();
+        if alt.as_deref() == Some(jetzt) {
+            return;
+        }
+        self.set_key("version_gesehen", jetzt);
+        self.settings.version_gesehen = Some(jetzt.to_string());
+        self.cfg_mtime = mtime(&self.cfg_path);
+        if neue_ini || crate::installer::NEUES.is_empty() || crate::installer::NEUES_FUER != jetzt {
+            return;
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            let mut befehl = std::process::Command::new(exe);
+            befehl.arg("--changelog");
+            // `version_gesehen` gibt es erst seit 0.9.1: fehlt der Schluessel, lief vorher (praktisch immer) 0.9.0
+            befehl.arg(alt.unwrap_or_else(|| "0.9.0".to_string()));
+            let _ = befehl.spawn();
+        }
+    }
+
     pub fn set_key(&mut self, key: &str, val: &str) {
         let Ok(text) = std::fs::read_to_string(&self.cfg_path) else { return };
         let mut lines: Vec<String> = text.lines().map(String::from).collect();
@@ -482,6 +523,7 @@ impl App {
         self.settings.modules = toggle_module(&self.settings.modules, m);
         let v = self.settings.modules.join(" ");
         self.set_key("module", &v);
+        self.set_key("module_bekannt", &crate::config::module_bekannt());
         self.hover = None;
         self.render();
     }
@@ -560,6 +602,20 @@ impl App {
         self.update_power();
         self.update_visibility();
         self.render();
+        self.auto_update();
+    }
+
+    /// Liegt ein Update bereit und ist `update_auto` an: installieren, sobald kein Vollbild laeuft
+    /// und seit einer Minute niemand Maus oder Tastatur benutzt hat (nichts wird mitten im Tippen beendet).
+    fn auto_update(&self) {
+        if !self.settings.update_auto || !matches!(crate::update::zustand(), crate::update::Zustand::Bereit(_)) {
+            return;
+        }
+        if fullscreen_active() || leerlauf_ms() < 60_000 {
+            return;
+        }
+        // per Nachricht: DestroyWindow mitten in with_app waere ein zweiter Zugriff auf die App
+        unsafe { PostMessageW(self.hwnd, crate::update::WM_UPDATE_INSTALLIEREN, 0, 0) };
     }
 
     /// Neues Ping-Ergebnis: Graph nur dann einen Schritt weiter, wenn wirklich gepingt wurde.
@@ -654,7 +710,7 @@ impl App {
     }
 
     /// CPU und GPU: oben Name und Last, darunter Takt und Temperatur in festen Spalten, damit beide
-    /// Elemente genau untereinander stehen. Fehlt ein Wert (CPU-Temperatur ohne Adminrechte), steht dort "–".
+    /// Elemente genau untereinander stehen. Fehlt der Takt, steht dort "–"; fehlt die Temperatur, bleibt ihre Stelle leer.
     #[allow(clippy::too_many_arguments)]
     fn werte_zeile(&self, f: &mut Frame, label: &str, name: &str, ghz: Option<f32>, temp: Option<f32>, pct: f32, zeit: Option<u32>) {
         let st = &self.settings;
@@ -676,13 +732,11 @@ impl App {
             None => self.put(f, "\u{2013} GHz", links, false, gw, st.dim),
         };
         let tx = links + gw + 2 * f.gap;
-        match temp {
-            Some(t) => {
-                let col = if t >= 90.0 { COL_RED } else if t >= 80.0 { COL_YELLOW } else { st.accent };
-                self.put(f, &format!("{t:.0}\u{b0}C"), tx, false, tw, col)
-            }
-            None => self.put(f, "\u{2013}\u{b0}C", tx, false, tw, st.dim),
-        };
+        // Ohne Wert (PawnIO fehlt, Aufgabe nicht eingerichtet, GPU ohne Sensor) bleibt die Stelle leer
+        if let Some(t) = temp {
+            let col = if t >= 90.0 { COL_RED } else if t >= 80.0 { COL_YELLOW } else { st.accent };
+            self.put(f, &format!("{t:.0}\u{b0}C"), tx, false, tw, col);
+        }
     }
 
     fn el_cpu(&self, f: &mut Frame) {

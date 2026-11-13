@@ -30,6 +30,16 @@ pub fn in_programme(exe: &Path) -> bool {
 /// Alle Elemente in Standard-Reihenfolge. Jedes kann in der ini oder im Menue einzeln an/aus.
 pub const KNOWN_MODULES: [&str; 10] = ["kopf", "uhr", "cpu", "gpu", "ram", "platten", "netz", "energie", "ping", "todo"];
 
+/// Elemente, die es schon gab, bevor die ini `module_bekannt` mitschrieb (bis 0.9.0).
+/// Alles, was eine ini noch nicht kennt, wird beim Laden einmal eingeschaltet - so taucht ein
+/// neues Element nach einem Update auch bei einer alten ini auf, ein abgewaehltes bleibt aber aus.
+const MODULE_BIS_090: [&str; 9] = ["kopf", "uhr", "cpu", "gpu", "ram", "platten", "netz", "energie", "ping"];
+
+/// Wert fuer `module_bekannt`: alle Elemente dieser Version
+pub fn module_bekannt() -> String {
+    KNOWN_MODULES.join(" ")
+}
+
 pub const ZOOM_MIN: u32 = 50;
 pub const ZOOM_MAX: u32 = 300;
 pub const ZOOM_SCHRITT: u32 = 5;
@@ -49,6 +59,7 @@ pub const DEFAULT_SETTINGS: &str = "\
 # Sysglow-Konfiguration. Aenderungen werden beim Speichern automatisch uebernommen.
 #
 # module         = Elemente in dieser Reihenfolge: kopf uhr cpu gpu ram platten netz energie ping todo (weglassen = aus)
+# module_bekannt = von Sysglow gepflegt: Elemente, die diese ini schon kennt; neue kommen nach einem Update einmal dazu
 # breite         = Breite in Pixeln (bei 100 % Skalierung)
 # zoom           = Groesse in Prozent, 50 bis 300 (Maus aufs Widget, dann + oder -)
 # anzeige_sekunden = Sekunden zwischen zwei Messungen und Bildaufbau (CPU, GPU, RAM, Platten, Netz)
@@ -59,6 +70,9 @@ pub const DEFAULT_SETTINGS: &str = "\
 # hintergrund    = Deckkraft des Hintergrunds, 0 (durchsichtig) bis 255
 # hintergrund_farbe = Farbe des Hintergrunds als RRGGBB, Standard 000000 (schwarz)
 # version        = 1: Versionsnummer als eigene Zeile ganz oben, 0 = aus
+# version_gesehen = von Sysglow gepflegt: zuletzt gestartete Version; ist sie aelter, kommt einmal das Fenster mit den Neuerungen
+# update_auto    = 1: neue Versionen von GitHub selbst installieren (taeglich geprueft), 0 = nur im Menue anbieten
+# update_geprueft = von Sysglow gepflegt: Zeitpunkt der letzten Update-Pruefung (verpasste Pruefungen holt Sysglow beim Start nach)
 # rand_rechts / rand_oben = Abstand zum Bildschirmrand, solange nicht verschoben
 # pos_x / pos_y  = Position nach dem Verschieben (Menue \"Position zuruecksetzen\" = wieder oben rechts)
 # gesperrt       = 1 verhindert Verschieben mit der Maus
@@ -76,6 +90,7 @@ pub const DEFAULT_SETTINGS: &str = "\
 # Google: Kalender-Einstellungen > \"Geheime Adresse im iCal-Format\" kopieren. Diese Adresse nicht weitergeben.
 # kalender = Geburtstage | geburtstag | 1 | https://calendar.google.com/calendar/ical/.../basic.ics
 module = kopf uhr cpu gpu ram platten netz energie ping todo
+module_bekannt = kopf uhr cpu gpu ram platten netz energie ping todo
 breite = 220
 zoom = 100
 anzeige_sekunden = 3
@@ -185,6 +200,8 @@ Cloudflare | 1.1.1.1     | 40 | 80 | 0
 #[derive(Clone)]
 pub struct Settings {
     pub modules: Vec<String>,
+    /// Beim Laden neu eingeschaltete Elemente (die ini kannte sie noch nicht) - die App schreibt sie zurueck
+    pub module_neu: Vec<String>,
     pub width: f32,
     /// Groesse in Prozent (50..300), wirkt auf alles samt Schrift
     pub zoom: u32,
@@ -199,6 +216,12 @@ pub struct Settings {
     pub bg_farbe: u32,
     /// Versionszeile ganz oben
     pub version_zeigen: bool,
+    /// Zuletzt gestartete Version (fuer das Changelog-Fenster nach einem Update)
+    pub version_gesehen: Option<String>,
+    /// Updates selbst installieren (sonst nur im Menue anbieten)
+    pub update_auto: bool,
+    /// Unix-Sekunden der letzten erfolgreichen Update-Pruefung
+    pub update_geprueft: u64,
     pub margin_right: i32,
     pub margin_top: i32,
     pub pos: Option<(i32, i32)>,
@@ -235,6 +258,7 @@ pub struct HostCfg {
 pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
     let mut s = Settings {
         modules: KNOWN_MODULES.iter().map(|m| m.to_string()).collect(),
+        module_neu: Vec::new(),
         width: 220.0,
         zoom: 100,
         refresh: 3,
@@ -246,6 +270,9 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
         bg: 0,
         bg_farbe: 0,
         version_zeigen: true,
+        version_gesehen: None,
+        update_auto: true,
+        update_geprueft: 0,
         margin_right: 0,
         margin_top: 0,
         pos: None,
@@ -266,6 +293,8 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
     let (mut pos_x, mut pos_y) = (None, None);
     let (mut color, mut accent) = (String::from("gruen"), None);
     let mut hosts = Vec::new();
+    let mut hat_module = false;
+    let mut bekannt: Option<Vec<String>> = None;
     for (i, raw) in text.lines().enumerate() {
         let l = raw.trim_start_matches('\u{feff}').trim();
         if l.is_empty() || l.starts_with('#') || l.starts_with(';') {
@@ -291,7 +320,9 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
         } else if let Some((k, v)) = l.split_once('=') {
             let v = v.trim();
             match k.trim().to_lowercase().as_str() {
+                "module_bekannt" => bekannt = Some(v.split(|c: char| c.is_whitespace() || c == ',').map(str::to_lowercase).collect()),
                 "module" => {
+                    hat_module = true;
                     s.modules = v
                         .split(|c: char| c.is_whitespace() || c == ',')
                         .map(str::to_lowercase)
@@ -310,6 +341,9 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
                 "hintergrund" => s.bg = v.parse::<u32>().unwrap_or(0).min(255) as u8,
                 "hintergrund_farbe" => s.bg_farbe = parse_hex(v).unwrap_or(0),
                 "version" => s.version_zeigen = v != "0",
+                "version_gesehen" => s.version_gesehen = Some(v.to_string()),
+                "update_auto" => s.update_auto = v != "0",
+                "update_geprueft" => s.update_geprueft = v.parse().unwrap_or(0),
                 "rand_rechts" => s.margin_right = v.parse().unwrap_or(0),
                 "rand_oben" => s.margin_top = v.parse().unwrap_or(0),
                 "pos_x" => pos_x = v.parse::<i32>().ok(),
@@ -337,6 +371,15 @@ pub fn parse_config(text: &str) -> (Settings, Vec<HostCfg>) {
         }
     }
     s.pos = pos_x.zip(pos_y);
+    if hat_module {
+        let bekannt = bekannt.unwrap_or_else(|| MODULE_BIS_090.iter().map(|m| m.to_string()).collect());
+        for m in KNOWN_MODULES.iter().filter(|m| !bekannt.iter().any(|b| b == *m)) {
+            if !s.modules.iter().any(|x| x == m) {
+                s.modules = toggle_module(&s.modules, m);
+            }
+            s.module_neu.push(m.to_string());
+        }
+    }
     let (fg, acc) = match THEMES.iter().find(|t| t.0 == color) {
         Some(t) => (t.1, t.2),
         None => parse_hex(&color).map_or((THEMES[0].1, THEMES[0].2), |c| (c, THEMES[0].2)),
@@ -370,6 +413,32 @@ pub fn toggle_module(modules: &[String], m: &str) -> Vec<String> {
     let mut v = modules.to_vec();
     v.insert(at, m.to_string());
     v
+}
+
+#[cfg(test)]
+mod module_tests {
+    use super::*;
+
+    #[test]
+    fn alte_ini_bekommt_todo() {
+        let (s, _) = parse_config("module = kopf uhr cpu ping\n");
+        assert_eq!(s.modules, ["kopf", "uhr", "cpu", "ping", "todo"]);
+        assert_eq!(s.module_neu, ["todo"]);
+    }
+
+    #[test]
+    fn abgewaehltes_bleibt_aus() {
+        let (s, _) = parse_config("module = kopf uhr cpu\nmodule_bekannt = kopf uhr cpu gpu ram platten netz energie ping todo\n");
+        assert_eq!(s.modules, ["kopf", "uhr", "cpu"]);
+        assert!(s.module_neu.is_empty());
+    }
+
+    #[test]
+    fn vorlage_kennt_alle() {
+        let (s, _) = parse_config(DEFAULT_SETTINGS);
+        assert_eq!(s.modules.len(), KNOWN_MODULES.len());
+        assert!(s.module_neu.is_empty());
+    }
 }
 
 #[cfg(test)]

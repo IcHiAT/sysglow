@@ -30,6 +30,56 @@ static AMD_17: &[u8] = include_bytes!("../assets/pawnio/AMDFamily17.bin");
 struct Daten {
     temp: f32,
     zaehler: u32,
+    /// Warum der Dienst nicht misst (siehe `Fehler`), 0 = kein Fehler
+    fehler: u32,
+}
+
+/// Gruende, warum keine Temperatur kommt. Der Dienst schreibt sie in den Speicher, bevor er aufgibt.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Fehler {
+    /// PawnIO-Treiber nicht installiert (PawnIOLib.dll fehlt)
+    KeinPawnIo = 1,
+    /// PawnIO laesst sich nicht oeffnen: Aufgabe laeuft ohne Adminrechte
+    KeinZugriff = 2,
+    /// Modul fuer diese CPU wird nicht geladen (PawnIO zu alt?)
+    Modul = 3,
+    /// CPU-Hersteller oder -Familie wird nicht unterstuetzt
+    Cpu = 4,
+    /// Modul geladen, aber das Register liefert nichts
+    Messen = 5,
+}
+
+impl Fehler {
+    fn aus(n: u32) -> Option<Fehler> {
+        [Fehler::KeinPawnIo, Fehler::KeinZugriff, Fehler::Modul, Fehler::Cpu, Fehler::Messen].into_iter().find(|f| *f as u32 == n)
+    }
+
+    /// Kurzer Text fuers Tray-Menue
+    pub fn text(self) -> &'static str {
+        match self {
+            Fehler::KeinPawnIo => "CPU-Temperatur: erst PawnIO installieren (pawnio.eu)",
+            Fehler::KeinZugriff => "CPU-Temperatur: keine Adminrechte - neu einrichten",
+            Fehler::Modul => "CPU-Temperatur: PawnIO-Modul lädt nicht - PawnIO aktualisieren",
+            Fehler::Cpu => "CPU-Temperatur: diese CPU wird nicht unterstützt",
+            Fehler::Messen => "CPU-Temperatur: CPU liefert keinen Wert",
+        }
+    }
+}
+
+/// Pfade, unter denen PawnIOLib.dll gesucht wird
+fn pawnio_pfade() -> Vec<String> {
+    let mut v = Vec::new();
+    for var in ["ProgramFiles", "ProgramW6432"] {
+        if let Ok(pf) = std::env::var(var) {
+            v.push(format!("{pf}\\PawnIO\\PawnIOLib.dll"));
+        }
+    }
+    v
+}
+
+/// Ist der PawnIO-Treiber installiert? Geht ohne Adminrechte.
+pub fn pawnio_da() -> bool {
+    pawnio_pfade().iter().any(|p| std::path::Path::new(p).is_file())
 }
 
 // ---------------------------------------------------------------- Anzeige-Seite
@@ -84,6 +134,16 @@ impl Leser {
     /// Liefert der Dienst gerade Werte?
     pub fn aktiv(&self) -> bool {
         self.gleich < 5 && self.letzter != 0
+    }
+
+    /// Warum keine Werte kommen: vom Dienst gemeldet, oder PawnIO fehlt ganz.
+    /// Ohne eingerichtete Aufgabe meldet der Dienst nichts, dann zaehlt nur das fehlende PawnIO.
+    pub fn fehler(&self) -> Option<Fehler> {
+        if self.aktiv() {
+            return None;
+        }
+        let gemeldet = (!self.view.is_null()).then(|| unsafe { std::ptr::read_volatile(self.view) }.fehler).and_then(Fehler::aus);
+        gemeldet.or_else(|| (!pawnio_da()).then_some(Fehler::KeinPawnIo))
     }
 }
 
@@ -207,27 +267,24 @@ struct Pawn {
 }
 
 impl Pawn {
-    unsafe fn laden(modul: &[u8]) -> Option<Pawn> {
-        let mut kandidaten = Vec::new();
-        if let Ok(pf) = std::env::var("ProgramFiles") {
-            kandidaten.push(format!("{pf}\\PawnIO\\PawnIOLib.dll"));
-        }
+    unsafe fn laden(modul: &[u8]) -> Result<Pawn, Fehler> {
+        let mut kandidaten = pawnio_pfade();
         kandidaten.push("PawnIOLib.dll".into());
-        let lib = kandidaten.iter().map(|p| LoadLibraryW(wide(p).as_ptr())).find(|l| !l.is_null())?;
-        let f = |n: &str| GetProcAddress(lib, format!("{n}\0").as_ptr());
+        let lib = kandidaten.iter().map(|p| LoadLibraryW(wide(p).as_ptr())).find(|l| !l.is_null()).ok_or(Fehler::KeinPawnIo)?;
+        let f = |n: &str| GetProcAddress(lib, format!("{n}\0").as_ptr()).ok_or(Fehler::KeinPawnIo);
         let open: FnOpen = std::mem::transmute(f("pawnio_open")?);
         let load: FnLoad = std::mem::transmute(f("pawnio_load")?);
         let exec: FnExec = std::mem::transmute(f("pawnio_execute")?);
         let close: FnClose = std::mem::transmute(f("pawnio_close")?);
         let mut h: HANDLE = null_mut();
         if open(&mut h) < 0 || h.is_null() {
-            return None;
+            return Err(Fehler::KeinZugriff);
         }
         if load(h, modul.as_ptr(), modul.len()) < 0 {
             close(h);
-            return None;
+            return Err(Fehler::Modul);
         }
-        Some(Pawn { h, exec, close })
+        Ok(Pawn { h, exec, close })
     }
 
     unsafe fn rufen(&self, name: &str, ein: u64) -> Option<u64> {
@@ -293,24 +350,45 @@ unsafe fn messen(p: &Pawn, cpu: &Cpu) -> Option<f32> {
 }
 
 /// Öffnet PawnIO und das passende Modul. Für den Dienst und den Test.
-unsafe fn verbinden() -> Option<(Pawn, Cpu)> {
-    let (intel, familie) = hersteller()?;
+unsafe fn verbinden() -> Result<(Pawn, Cpu), Fehler> {
+    let (intel, familie) = hersteller().ok_or(Fehler::Cpu)?;
     if intel {
         let p = Pawn::laden(INTEL_MSR)?;
         let tj = p.rufen("ioctl_read_msr", 0x1A2).map(|v| ((v >> 16) & 0xFF) as f32).filter(|t| *t > 0.0).unwrap_or(100.0);
-        Some((p, Cpu::Intel { tjmax: tj }))
+        Ok((p, Cpu::Intel { tjmax: tj }))
     } else if familie >= 0x17 {
-        Some((Pawn::laden(AMD_17)?, Cpu::Zen))
+        Ok((Pawn::laden(AMD_17)?, Cpu::Zen))
     } else {
-        None
+        Err(Fehler::Cpu)
     }
+}
+
+/// Schreibt in den gemeinsamen Speicher, falls die Anzeige ihn angelegt hat.
+unsafe fn melden(d: Daten) {
+    let map = OpenFileMappingW(FILE_MAP_WRITE, 0, wide(SPEICHER).as_ptr());
+    if map.is_null() {
+        return;
+    }
+    let view = MapViewOfFile(map, FILE_MAP_WRITE, 0, 0, 0);
+    if !view.Value.is_null() {
+        std::ptr::write_volatile(view.Value as *mut Daten, d);
+        UnmapViewOfFile(view);
+    }
+    CloseHandle(map);
 }
 
 /// Erhöhter Teil: schreibt alle 2 s die Temperatur, solange die Anzeige läuft.
 pub fn dienst() -> i32 {
     unsafe {
-        let Some((p, cpu)) = verbinden() else { return 4 };
+        let (p, cpu) = match verbinden() {
+            Ok(x) => x,
+            Err(f) => {
+                melden(Daten { temp: 0.0, zaehler: 0, fehler: f as u32 });
+                return 4;
+            }
+        };
         let mut zaehler = 0u32;
+        let mut fehlversuche = 0u32;
         loop {
             // Läuft keine Anzeige mehr, beendet sich der Dienst sofort (gibt die exe für Updates frei)
             let m = OpenMutexW(0x0010_0000 /* SYNCHRONIZE */, 0, wide(ANZEIGE_MUTEX).as_ptr());
@@ -318,17 +396,20 @@ pub fn dienst() -> i32 {
                 return 0;
             } else {
                 CloseHandle(m);
-                let map = OpenFileMappingW(FILE_MAP_WRITE, 0, wide(SPEICHER).as_ptr());
-                if !map.is_null() {
-                    let view = MapViewOfFile(map, FILE_MAP_WRITE, 0, 0, 0);
-                    if !view.Value.is_null() {
-                        if let Some(t) = messen(&p, &cpu) {
-                            zaehler = zaehler.wrapping_add(1).max(1);
-                            std::ptr::write_volatile(view.Value as *mut Daten, Daten { temp: t, zaehler });
-                        }
-                        UnmapViewOfFile(view);
+                match messen(&p, &cpu) {
+                    Some(t) => {
+                        zaehler = zaehler.wrapping_add(1).max(1);
+                        fehlversuche = 0;
+                        melden(Daten { temp: t, zaehler, fehler: 0 });
                     }
-                    CloseHandle(map);
+                    None => {
+                        fehlversuche += 1;
+                        // nie einen Wert bekommen: nach etwa 10 s aufgeben und den Grund melden
+                        if fehlversuche >= 5 && zaehler == 0 {
+                            melden(Daten { temp: 0.0, zaehler: 0, fehler: Fehler::Messen as u32 });
+                            return 5;
+                        }
+                    }
                 }
             }
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -340,7 +421,7 @@ pub fn dienst() -> i32 {
 #[allow(dead_code)]
 pub fn einmal() -> Option<f32> {
     unsafe {
-        let (p, cpu) = verbinden()?;
+        let (p, cpu) = verbinden().ok()?;
         messen(&p, &cpu)
     }
 }

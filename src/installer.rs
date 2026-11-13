@@ -30,8 +30,47 @@ const ROT: u32 = gfx::COL_RED;
 const GRUEN: u32 = gfx::COL_FG;
 const HOVER: u32 = 0x1E4B32;
 const SCHWARZ: u32 = 0;
+/// Rastergroesse des Zahlenregens in px (vor DPI-Skalierung)
+const REGEN_ZELLE: f32 = 9.0;
 const REGEN_ZEICHEN: &[u8] = b"01ABCDEF";
-const REGEN_STUFEN: [u32; 6] = [190, 130, 90, 60, 38, 22];
+const REGEN_STUFEN: [u32; 6] = [115, 80, 56, 38, 25, 15];
+const GELB: u32 = gfx::COL_YELLOW;
+
+/// Kurzer Changelog fuer das Fenster nach einem Update: `+` neu, `-` weg, `*` behoben.
+/// Hoechstens 5 Zeilen mit je hoechstens 35 Zeichen. Bei jedem Release `NEUES_FUER` mitziehen,
+/// sonst schlaegt der Test `neues_passt_zur_version` fehl.
+/// Zeichen je Changelog-Zeile nach dem Zeichen + - *, laengere Eintraege brechen um
+const UMBRUCH: usize = 38;
+
+/// Bricht einen Eintrag "+ Text" am Wortende in Zeilen zu hoechstens `max` Textzeichen.
+/// Folgezeilen beginnen mit einem Leerzeichen statt + - *, damit ihr Text buendig darunter steht.
+fn umbrechen(eintrag: &str, max: usize) -> Vec<String> {
+    let mut c = eintrag.chars();
+    let zeichen = c.next().unwrap_or(' ');
+    let mut zeilen: Vec<String> = Vec::new();
+    let mut akt = String::new();
+    for wort in c.as_str().split_whitespace() {
+        if !akt.is_empty() && akt.chars().count() + 1 + wort.chars().count() > max {
+            zeilen.push(std::mem::take(&mut akt));
+        }
+        if !akt.is_empty() {
+            akt.push(' ');
+        }
+        akt.push_str(wort);
+    }
+    zeilen.push(akt);
+    zeilen.into_iter().enumerate().map(|(i, t)| format!("{} {t}", if i == 0 { zeichen } else { ' ' })).collect()
+}
+
+pub const NEUES_FUER: &str = "0.9.1";
+pub const NEUES: &[&str] = &[
+    "+ Autoupdate",
+    "+ Dieses Fenster nach jedem Update",
+    "+ Neue Elemente auch mit alter ini",
+    "+ Menü zeigt, warum CPU-Temp fehlt",
+    "- –°C ohne Wert entfällt",
+    "* Todo fehlte nach Update",
+];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Aktion {
@@ -50,6 +89,11 @@ struct Knopf {
 
 struct Fenster {
     scale: f32,
+    hoehe: f32,
+    /// Changelog-Zeilen, schon umbrochen; leer = Installationsfenster
+    zeilen: Vec<String>,
+    /// Version vor dem Update (leer = unbekannt), steht im Changelog als "vALT -> vNEU"
+    alt_version: String,
     ziel: PathBuf,
     kopf: Vec<f32>,
     tempo: Vec<f32>,
@@ -88,7 +132,7 @@ fn zielpfad() -> Option<PathBuf> {
 
 /// true, wenn beim Start das Fenster statt des Widgets erscheinen soll.
 pub fn soll_fenster() -> bool {
-    if std::env::args().any(|a| a == "--restart") {
+    if std::env::args().any(|a| a == "--restart" || a == "--nach-update") {
         return false;
     }
     let Ok(exe) = std::env::current_exe() else { return false };
@@ -234,7 +278,7 @@ impl Fenster {
     }
 
     fn knopf_rect(&self, k: &Knopf) -> RECT {
-        self.rect(k.x, 106.0, 100.0, 32.0)
+        self.rect(k.x, self.hoehe - 44.0, 100.0, 32.0)
     }
 
     fn schliessen_rect(&self) -> RECT {
@@ -261,24 +305,24 @@ impl Fenster {
 
     fn regen_schritt(&mut self) {
         let faktor = if self.lauf_text.is_some() { 2.5 } else { 1.0 };
-        let zeilen = HOEHE / 13.0 + 6.0;
+        let zeilen = self.hoehe / REGEN_ZELLE + 6.0;
         for s in 0..self.kopf.len() {
             self.kopf[s] += self.tempo[s] * faktor;
             if self.kopf[s] > zeilen {
                 self.kopf[s] = -12.0 * self.zufall();
-                self.tempo[s] = 0.12 + self.zufall() * 0.28;
+                self.tempo[s] = 0.28 + self.zufall() * 0.63;
             }
         }
     }
 
     unsafe fn malen(&self, dc: HDC) {
-        let (b, h) = (self.p(BREITE), self.p(HOEHE));
+        let (b, h) = (self.p(BREITE), self.p(self.hoehe));
         flaeche(dc, RECT { left: 0, top: 0, right: b, bottom: h }, GRUEN);
         let rand = self.p(2.0).max(1);
         flaeche(dc, RECT { left: rand, top: rand, right: b - rand, bottom: h - rand }, SCHWARZ);
 
         SetBkMode(dc, TRANSPARENT as _);
-        let zelle = self.p(13.0);
+        let zelle = self.p(REGEN_ZELLE);
         for (s, kopf) in self.kopf.iter().enumerate() {
             let zeile = kopf.floor() as i32;
             for (n, stufe) in REGEN_STUFEN.iter().enumerate() {
@@ -287,7 +331,7 @@ impl Fenster {
                     continue;
                 }
                 let zeichen = REGEN_ZEICHEN[(s * 7 + z as usize * 13) % REGEN_ZEICHEN.len()] as char;
-                let farbe = ((stufe * 124 / 255) << 16) | (stufe << 8) | (stufe * 178 / 255);
+                let farbe = (stufe << 16) | (stufe << 8) | stufe; // weiss, gedimmt
                 let px = rand + s as i32 * zelle;
                 if px + zelle < b - rand && z * zelle + zelle < h - rand {
                     text(dc, self.f_regen, px, rand + z * zelle, &zeichen.to_string(), farbe);
@@ -295,10 +339,27 @@ impl Fenster {
             }
         }
 
-        // Texte mit schwarzem Grund, damit sie ueber dem Regen lesbar bleiben.
-        SetBkMode(dc, OPAQUE as _);
+        // Texte ohne eigenen Hintergrund direkt ueber dem (gedimmten) Regen
+        SetBkMode(dc, TRANSPARENT as _);
         SetBkColor(dc, 0);
         text(dc, self.f_titel, self.p(16.0), self.p(12.0), "> SYSGLOW_", GRUEN);
+        if !self.zeilen.is_empty() {
+            let neu = concat!("v", env!("CARGO_PKG_VERSION"));
+            let kopf = if self.alt_version.is_empty() { neu.to_string() } else { format!("v{} → {neu}", self.alt_version) };
+            text(dc, self.f_text, self.p(122.0), self.p(16.0), &kopf, GRUEN);
+        }
+        for (i, z) in self.zeilen.iter().enumerate() {
+            let y = self.p(46.0 + i as f32 * 18.0);
+            let mut zeichen = z.chars();
+            let erstes = zeichen.next().unwrap_or(' ');
+            let farbe = match erstes {
+                '-' => ROT,
+                '*' => GELB,
+                _ => GRUEN,
+            };
+            text(dc, self.f_knopf, self.p(16.0), y, &erstes.to_string(), farbe);
+            text(dc, self.f_text, self.p(26.0), y, zeichen.as_str(), GRUEN);
+        }
         if !self.info.is_empty() {
             text(dc, self.f_text, self.p(16.0), self.p(44.0), &self.info, GRUEN);
         }
@@ -428,7 +489,7 @@ unsafe extern "system" fn fenster_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
         WM_PAINT => {
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
             let dc = BeginPaint(hwnd, &mut ps);
-            let (b, h) = (f.p(BREITE), f.p(HOEHE));
+            let (b, h) = (f.p(BREITE), f.p(f.hoehe));
             let mem = CreateCompatibleDC(dc);
             let bild = CreateCompatibleBitmap(dc, b, h);
             let alt = SelectObject(mem, bild as HGDIOBJ);
@@ -477,12 +538,14 @@ pub unsafe fn zeigen(scale: f32) -> bool {
     } else {
         vec![Knopf { text: "START", x: 16.0, aktion: Aktion::Start }, Knopf { text: "INSTALL", x: 224.0, aktion: Aktion::Install }]
     };
-    let spalten = (BREITE / 13.0).ceil() as usize;
-    let mut f = Box::new(Fenster {
+    let f = Box::new(Fenster {
         scale,
+        hoehe: HOEHE,
+        zeilen: Vec::new(),
+        alt_version: String::new(),
         ziel,
-        kopf: vec![0.0; spalten],
-        tempo: vec![0.0; spalten],
+        kopf: Vec::new(),
+        tempo: Vec::new(),
         zufall: GetTickCount() | 1,
         takt: 0,
         knoepfe,
@@ -496,13 +559,49 @@ pub unsafe fn zeigen(scale: f32) -> bool {
         f_titel: schrift(13.0, scale, 700),
         f_text: schrift(10.0, scale, 400),
         f_knopf: schrift(10.0, scale, 700),
-        f_regen: schrift(8.0, scale, 400),
+        f_regen: schrift(5.5, scale, 400),
     });
+    laufen(f, "Sysglow Installer")
+}
+
+/// Kleines Fenster mit dem kurzen Changelog (`NEUES`), mittig, OK schliesst.
+pub unsafe fn changelog(scale: f32, alt_version: &str) {
+    let zeilen: Vec<String> = NEUES.iter().flat_map(|z| umbrechen(z, UMBRUCH)).collect();
+    let f = Box::new(Fenster {
+        scale,
+        hoehe: 46.0 + zeilen.len() as f32 * 18.0 + 56.0,
+        zeilen,
+        alt_version: alt_version.trim_start_matches('v').to_string(),
+        ziel: PathBuf::new(),
+        kopf: Vec::new(),
+        tempo: Vec::new(),
+        zufall: GetTickCount() | 1,
+        takt: 0,
+        knoepfe: vec![Knopf { text: "OK", x: (BREITE - 100.0) / 2.0, aktion: Aktion::Exit }],
+        hover: None,
+        info: String::new(),
+        status: String::new(),
+        status_rot: false,
+        lauf_text: None,
+        fertig_text: "",
+        widget_starten: false,
+        f_titel: schrift(13.0, scale, 700),
+        f_text: schrift(10.0, scale, 400),
+        f_knopf: schrift(10.0, scale, 700),
+        f_regen: schrift(5.5, scale, 400),
+    });
+    laufen(f, "Sysglow Neuigkeiten");
+}
+
+unsafe fn laufen(mut f: Box<Fenster>, titel: &str) -> bool {
+    let spalten = (BREITE / REGEN_ZELLE).ceil() as usize;
+    f.kopf = vec![0.0; spalten];
+    f.tempo = vec![0.0; spalten];
     for s in 0..spalten {
         f.kopf[s] = -20.0 + f.zufall() * 34.0;
-        f.tempo[s] = 0.12 + f.zufall() * 0.28;
+        f.tempo[s] = 0.28 + f.zufall() * 0.63;
     }
-    let (b, h) = (f.p(BREITE), f.p(HOEHE));
+    let (b, h) = (f.p(BREITE), f.p(f.hoehe));
     ZUSTAND.store(&mut *f, Relaxed);
 
     let inst = GetModuleHandleW(null());
@@ -517,7 +616,7 @@ pub unsafe fn zeigen(scale: f32) -> bool {
 
     let x = (GetSystemMetrics(SM_CXSCREEN) - b) / 2;
     let y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
-    let hwnd = CreateWindowExW(WS_EX_TOPMOST, klasse.as_ptr(), wide("Sysglow Installer").as_ptr(), WS_POPUP | WS_VISIBLE, x, y, b, h, null_mut(), null_mut(), inst, null());
+    let hwnd = CreateWindowExW(WS_EX_TOPMOST, klasse.as_ptr(), wide(titel).as_ptr(), WS_POPUP | WS_VISIBLE, x, y, b, h, null_mut(), null_mut(), inst, null());
     if hwnd.is_null() {
         ZUSTAND.store(null_mut(), Relaxed);
         return true;
@@ -541,6 +640,27 @@ pub unsafe fn zeigen(scale: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn neues_passt_zur_version() {
+        assert_eq!(NEUES_FUER, env!("CARGO_PKG_VERSION"), "installer::NEUES fuer die neue Version erneuern und NEUES_FUER anpassen");
+    }
+
+    #[test]
+    fn neues_passt_ins_fenster() {
+        let gesamt: usize = NEUES.iter().map(|z| umbrechen(z, UMBRUCH).len()).sum();
+        assert!(gesamt <= 8, "hoechstens 8 Zeilen nach Umbruch, sind {gesamt}");
+        for z in NEUES {
+            assert!(["+ ", "- ", "* "].iter().any(|p| z.starts_with(p)), "Zeile muss mit +, - oder * beginnen: {z}");
+        }
+    }
+
+    #[test]
+    fn lange_eintraege_brechen_am_wort_um() {
+        let z = umbrechen("* Todo fehlte nach Update, wenn die ini schon vor 0.9.0 angelegt war", 38);
+        assert_eq!(z, vec!["* Todo fehlte nach Update, wenn die ini", "  schon vor 0.9.0 angelegt war"]);
+        assert_eq!(umbrechen("+ kurz", 38), vec!["+ kurz"]);
+    }
 
     const ZIEL: &str = r"C:\Users\x\AppData\Local\Programs\Sysglow\Sysglow.exe";
 

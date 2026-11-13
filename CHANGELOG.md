@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.1 (13.11.2026)
+
+- Neu: Neue Elemente erscheinen nach einem Update auch mit einer bestehenden `sysglow.ini`. Sysglow merkt sich dazu in `module_bekannt`, welche Elemente die ini schon kennt; nur unbekannte werden einmal eingeschaltet, abgewählte bleiben aus. Damit taucht die Todo-Liste aus 0.9.0 jetzt auch bei älteren Installationen auf.
+- Neu: Kommt keine CPU-Temperatur, steht der Grund im Rechtsklick-Menü statt nur „–“ im Widget, z. B. „erst PawnIO installieren (pawnio.eu)“ oder „keine Adminrechte“. Fehlt der PawnIO-Treiber, öffnet der Menüpunkt die Downloadseite, statt sinnlos nach Adminrechten zu fragen.
+- Geändert: Ohne Temperaturwert zeigen CPU und GPU an dieser Stelle nichts mehr statt „–°C“.
+- Neu: Nach einem Update erscheint einmal ein kleines Fenster in der Mitte mit den Neuerungen (`+` neu, `-` weg, `*` behoben) und dem Sprung von der alten zur neuen Version. Sysglow merkt sich dazu `version_gesehen` in der ini; bei einer Erstinstallation kommt es nicht. Schließen mit OK, Esc oder Enter.
+- Neu: Sysglow aktualisiert sich selbst. Einmal am Tag fragt es bei GitHub nach dem neuesten Release; war der PC zur fälligen Zeit aus, holt es die Prüfung kurz nach dem Start nach (`update_geprueft` in der ini). Eine neue Version wird geladen, gegen Größe und SHA-256-Prüfsumme von GitHub geprüft und installiert, sobald kein Vollbild läuft und eine Minute niemand Maus oder Tastatur benutzt hat. Danach startet Sysglow neu und zeigt die Neuerungen. Rechtsklick → *Nach Update suchen* prüft sofort; der Haken *Autoupdate* (`update_auto`, Standard an) schaltet auf „nur anbieten“ um, dann steht *Update auf vX installieren* im Menü. Liegt Sysglow unter Program Files, öffnet der Menüpunkt die Downloadseite.
+- Neu: Zu lange Einträge im Neuerungsfenster brechen am Wortende um.
+- Geändert: Der Zahlenregen im Installations- und Neuerungsfenster ist kleiner, dichter, schneller und gedimmt weiß; die Schrift steht ohne schwarzen Kasten darüber.
+
 ## 0.9.0 (12.11.2026)
 
 - Neu: Hover auf den CPU- oder GPU-Graphen zeigt neben Last und Uhrzeit auch Takt und Temperatur dieser Messung.

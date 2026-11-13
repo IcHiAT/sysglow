@@ -200,8 +200,13 @@ pub fn parse_ics(text: &str, art: Art) -> Vec<Termin> {
 
 // ------------------------------------------------------------ Laden
 
-/// Laedt eine https-Adresse per WinHTTP (Proxy und Zertifikate wie Windows selbst).
+/// Laedt eine https-Adresse als Text.
 fn https_holen(url: &str) -> Result<String, String> {
+    https_bytes(url).map(|d| String::from_utf8_lossy(&d).into_owned())
+}
+
+/// Laedt eine https-Adresse per WinHTTP (Proxy und Zertifikate wie Windows selbst, folgt Weiterleitungen).
+pub fn https_bytes(url: &str) -> Result<Vec<u8>, String> {
     let url = match url.get(..9) {
         Some(p) if p.eq_ignore_ascii_case("webcal://") => format!("https://{}", &url[9..]),
         _ => url.to_string(),
@@ -270,7 +275,7 @@ fn https_holen(url: &str) -> Result<String, String> {
                     return Err("zu gross".into());
                 }
             }
-            Ok(String::from_utf8_lossy(&daten).into_owned())
+            Ok(daten)
         })();
         for h in handles.into_iter().rev() {
             WinHttpCloseHandle(h);

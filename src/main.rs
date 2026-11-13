@@ -26,6 +26,7 @@ mod startmenue;
 mod stats;
 mod termine;
 mod todo;
+mod update;
 
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
@@ -64,6 +65,8 @@ const MENU_STARTMENUE: usize = 9;
 const MENU_CPUTEMP: usize = 10;
 const MENU_VERSION: usize = 11;
 const MENU_BG: usize = 12;
+const MENU_UPDATE: usize = 13;
+const MENU_UPDATE_AUTO: usize = 14;
 const MENU_COLOR: usize = 200; // + Index in THEMES
 const MENU_MODULE: usize = 100; // + Index in KNOWN_MODULES
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -160,13 +163,15 @@ fn shell_open(cmd: &str) {
 
 // ---------------------------------------------------------------- Menue
 unsafe fn show_menu(hwnd: HWND) {
-    let Some((hidden, locked, modules, power_auto, color, gpu_da, temp_an, version)) = with_app(|a| {
+    let Some((hidden, locked, modules, power_auto, color, gpu_da, temp_an, temp_fehler, version)) = with_app(|a| {
         let s = &a.settings;
-        (a.user_hidden, s.locked, s.modules.clone(), s.power_auto, s.color.clone(), a.gpu.is_some(), a.cputemp.aktiv(), s.version_zeigen)
+        (a.user_hidden, s.locked, s.modules.clone(), s.power_auto, s.color.clone(), a.gpu.is_some(), a.cputemp.aktiv(), a.cputemp.fehler(), s.version_zeigen)
     })
     else {
         return;
     };
+    let update_auto = with_app(|a| a.settings.update_auto).unwrap_or(true);
+    let update = update::zustand();
     let auto = autostart_enabled();
     let im_startmenue = startmenue::vorhanden("Sysglow");
     let check = |b: bool| if b { MF_CHECKED } else { 0 };
@@ -202,7 +207,9 @@ unsafe fn show_menu(hwnd: HWND) {
     AppendMenuW(menu, MF_POPUP, colors as usize, wide("Farbe").as_ptr());
     AppendMenuW(menu, MF_STRING, MENU_BG, wide("Hintergrund …").as_ptr());
     AppendMenuW(menu, MF_STRING | check(power_auto), MENU_POWER_AUTO, wide("Energieplan bei Spielen umschalten").as_ptr());
-    AppendMenuW(menu, MF_STRING | check(temp_an), MENU_CPUTEMP, wide("CPU-Temperatur lesen (einmal Admin)").as_ptr());
+    // Kommt keine Temperatur, steht der Grund direkt im Menue statt nur "–" im Widget
+    let temp_text = temp_fehler.map_or("CPU-Temperatur lesen (einmal Admin)", |f| f.text());
+    AppendMenuW(menu, MF_STRING | check(temp_an), MENU_CPUTEMP, wide(temp_text).as_ptr());
     AppendMenuW(menu, MF_STRING | check(locked), MENU_LOCK, wide("Position sperren").as_ptr());
     AppendMenuW(menu, MF_STRING, MENU_RESETPOS, wide("Position zurücksetzen").as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, null());
@@ -210,6 +217,14 @@ unsafe fn show_menu(hwnd: HWND) {
     AppendMenuW(menu, MF_STRING, MENU_RELOAD, wide("Neu laden").as_ptr());
     AppendMenuW(menu, MF_STRING | check(auto), MENU_AUTOSTART, wide("Mit Windows starten").as_ptr());
     AppendMenuW(menu, MF_STRING | check(im_startmenue), MENU_STARTMENUE, wide("Im Startmenü anzeigen").as_ptr());
+    AppendMenuW(menu, MF_SEPARATOR, 0, null());
+    let update_text = match &update {
+        update::Zustand::Bereit(v) => format!("Update auf v{v} installieren"),
+        update::Zustand::NurSeite(v) => format!("Update v{v} herunterladen …"),
+        _ => "Nach Update suchen".to_string(),
+    };
+    AppendMenuW(menu, MF_STRING, MENU_UPDATE, wide(&update_text).as_ptr());
+    AppendMenuW(menu, MF_STRING | check(update_auto), MENU_UPDATE_AUTO, wide("Autoupdate").as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, null());
     AppendMenuW(menu, MF_STRING, MENU_EXIT, wide("Beenden").as_ptr());
     let mut pt = POINT { x: 0, y: 0 };
@@ -250,6 +265,10 @@ unsafe fn show_menu(hwnd: HWND) {
         }
         MENU_AUTOSTART => set_autostart(!auto),
         MENU_STARTMENUE => startmenue::setzen("Sysglow", !im_startmenue),
+        MENU_CPUTEMP if temp_fehler == Some(cputemp::Fehler::KeinPawnIo) => {
+            // Ohne PawnIO-Treiber bringt die Admin-Abfrage nichts: Downloadseite oeffnen
+            ShellExecuteW(null_mut(), wide("open").as_ptr(), wide("https://pawnio.eu/").as_ptr(), null(), null(), SW_SHOWNORMAL);
+        }
         MENU_CPUTEMP => {
             // eigener Thread: die Admin-Abfrage soll die Anzeige nicht anhalten
             std::thread::spawn(move || cputemp::einrichten(!temp_an));
@@ -265,6 +284,17 @@ unsafe fn show_menu(hwnd: HWND) {
             with_app(|a| a.toggle_version());
         }
         MENU_BG => schieber::oeffnen(),
+        MENU_UPDATE => match update {
+            update::Zustand::Bereit(_) => update_installieren(hwnd, true),
+            update::Zustand::NurSeite(_) => shell_open(update::SEITE),
+            _ => update::jetzt_pruefen(),
+        },
+        MENU_UPDATE_AUTO => {
+            with_app(|a| {
+                a.settings.update_auto = !update_auto;
+                a.set_key("update_auto", if update_auto { "0" } else { "1" });
+            });
+        }
         c if (MENU_COLOR..MENU_COLOR + THEMES.len()).contains(&c) => {
             with_app(|a| a.set_color(THEMES[c - MENU_COLOR].0));
         }
@@ -272,6 +302,62 @@ unsafe fn show_menu(hwnd: HWND) {
             with_app(|a| a.toggle_module(KNOWN_MODULES[c - MENU_MODULE]));
         }
         _ => {}
+    }
+}
+
+// ---------------------------------------------------------------- Update
+/// Tauscht die exe (siehe update.rs) und beendet dieses Widget; die neue exe startet von selbst.
+/// `melden`: Fehler als Meldung zeigen (bei Klick); beim automatischen Update still bleiben.
+pub unsafe fn update_installieren(hwnd: HWND, melden: bool) {
+    match update::installieren() {
+        Ok(()) => {
+            EXITING.store(true, Relaxed);
+            DestroyWindow(hwnd);
+        }
+        Err(e) => {
+            *update::ZUSTAND.lock().unwrap() = update::Zustand::Fehler(e.clone());
+            if melden {
+                meldung(hwnd, &format!("Update fehlgeschlagen: {e}"), MB_OK | MB_ICONWARNING);
+            }
+        }
+    }
+}
+
+unsafe fn meldung(hwnd: HWND, text: &str, art: MESSAGEBOX_STYLE) -> MESSAGEBOX_RESULT {
+    MessageBoxW(hwnd, wide(text).as_ptr(), wide("Sysglow").as_ptr(), art | MB_SETFOREGROUND)
+}
+
+/// Ergebnis einer Pruefung: Zeitpunkt merken; bei Klick auf "Nach Update suchen" Bescheid geben.
+unsafe fn update_ergebnis(hwnd: HWND, manuell: bool, ok: bool) {
+    if ok {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        with_app(|a| {
+            a.settings.update_geprueft = t;
+            a.set_key("update_geprueft", &t.to_string());
+        });
+    }
+    if !manuell {
+        return; // automatisch: tick() installiert, sobald niemand stoert; sonst steht es im Menue
+    }
+    match update::zustand() {
+        update::Zustand::Aktuell => {
+            meldung(hwnd, concat!("Sysglow v", env!("CARGO_PKG_VERSION"), " ist aktuell."), MB_OK | MB_ICONINFORMATION);
+        }
+        update::Zustand::Fehler(e) => {
+            meldung(hwnd, &format!("Update-Prüfung fehlgeschlagen: {e}"), MB_OK | MB_ICONWARNING);
+        }
+        update::Zustand::Bereit(v) => {
+            if meldung(hwnd, &format!("Sysglow v{v} ist da. Jetzt installieren?"), MB_YESNO | MB_ICONQUESTION) == IDYES {
+                update_installieren(hwnd, true);
+            }
+        }
+        update::Zustand::NurSeite(v) => {
+            let text = format!("Sysglow v{v} ist da, kann sich in diesem Ordner aber nicht selbst ersetzen. Downloadseite öffnen?");
+            if meldung(hwnd, &text, MB_YESNO | MB_ICONQUESTION) == IDYES {
+                shell_open(update::SEITE);
+            }
+        }
+        update::Zustand::Unbekannt => {}
     }
 }
 
@@ -286,6 +372,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_PING => {
             with_app(|a| a.on_ping());
+            0
+        }
+        update::WM_UPDATE_INSTALLIEREN => {
+            update_installieren(hwnd, false);
+            0
+        }
+        update::WM_UPDATE => {
+            update_ergebnis(hwnd, wp == 1, lp == 1);
             0
         }
         WM_DISPLAYCHANGE => {
@@ -485,13 +579,25 @@ fn main() {
         }
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
         let scale = GetDpiForSystem() as f32 / 96.0;
+        if std::env::args().nth(1).as_deref() == Some("--changelog") {
+            installer::changelog(scale, &std::env::args().nth(2).unwrap_or_default());
+            return;
+        }
         if installer::soll_fenster() && !installer::zeigen(scale) {
             return;
         }
-        // nur eine Instanz
-        CreateMutexW(null(), 0, wide("Local\\Sysglow.SingleInstance").as_ptr());
-        if GetLastError() == ERROR_ALREADY_EXISTS {
-            return;
+        // nur eine Instanz; nach einem Update kurz warten, bis die alte sich beendet hat
+        let warten = std::env::args().any(|a| a == "--nach-update");
+        for versuch in 0..40 {
+            let h = CreateMutexW(null(), 0, wide("Local\\Sysglow.SingleInstance").as_ptr());
+            if GetLastError() != ERROR_ALREADY_EXISTS {
+                break;
+            }
+            CloseHandle(h);
+            if !warten || versuch == 39 {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(250));
         }
 
         let inst = GetModuleHandleW(null());
@@ -529,11 +635,15 @@ fn main() {
         let font = schrift(scale);
 
         let cfg_path = config::ini_pfad();
+        let neue_ini = !cfg_path.exists();
         let mut app = App::new(hwnd, scale, font, cfg_path);
         app.load_config(); // startet auch den Mess-Timer
+        app.changelog_pruefen(neue_ini);
         app.stats.sample(None);
         app.update_visibility();
+        let geprueft = app.settings.update_geprueft;
         app::install(app);
+        update::starten(hwnd as usize, geprueft);
 
         TRAY_ICON.store(gfx::make_icon(GetSystemMetrics(SM_CXSMICON)) as usize, Relaxed);
         TASKBAR_MSG.store(RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()), Relaxed);
