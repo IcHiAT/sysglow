@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.2 (26.11.2026)
+
+- Neu: Läuft ein Spiel oder Video im Vollbild und wechselt man zum Desktop (Windows-Taste, Startmenü, Taskleiste) oder zu einem anderen Fenster wie Browser oder Claude, ist Sysglow sichtbar und anklickbar, während das Vollbild im Hintergrund weiterläuft. Zurück im Vollbild ist es wieder weg. Bei offenem Start oder offener Taskleiste liegt Sysglow kurz „immer oben“, vor einem normalen Fenster direkt darunter. Bewegt man die Maus über das Widget, bleibt es sichtbar, auch wenn man währenddessen ins Spiel zurückwechselt.
+- Geändert: Sysglow erkennt Fensterwechsel über Windows-Ereignisse (`SetWinEventHook`) statt nur über den 3-s-Messtakt. Das reagiert sofort und kostet keine zusätzliche CPU.
+
 ## 0.9.1 (13.11.2026)
 
 - Neu: Neue Elemente erscheinen nach einem Update auch mit einer bestehenden `sysglow.ini`. Sysglow merkt sich dazu in `module_bekannt`, welche Elemente die ini schon kennt; nur unbekannte werden einmal eingeschaltet, abgewählte bleiben aus. Damit taucht die Todo-Liste aus 0.9.0 jetzt auch bei älteren Installationen auf.

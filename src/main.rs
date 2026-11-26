@@ -39,6 +39,7 @@ use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::*;
 use windows_sys::Win32::System::Threading::CreateMutexW;
+use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows_sys::Win32::UI::HiDpi::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::Shell::{ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW};
@@ -52,6 +53,8 @@ const FONT_NAME: &str = "Consolas";
 const FONT_PT: f32 = 9.0;
 
 const WM_TRAY: u32 = WM_APP + 2;
+/// Vordergrund hat gewechselt: Sichtbarkeit sofort neu pruefen
+const WM_SICHTBAR: u32 = WM_APP + 40;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const MENU_CONFIG: usize = 1;
 const MENU_RELOAD: usize = 2;
@@ -75,6 +78,12 @@ const RUN_VALUE: &str = "Sysglow";
 static EXITING: AtomicBool = AtomicBool::new(false);
 static TASKBAR_MSG: AtomicU32 = AtomicU32::new(0);
 static TRAY_ICON: AtomicUsize = AtomicUsize::new(0);
+static HAUPT: AtomicUsize = AtomicUsize::new(0);
+
+/// Vordergrundwechsel, Minimieren, Wiederherstellen: ans Hauptfenster weiterreichen
+unsafe extern "system" fn vordergrund(_: HWINEVENTHOOK, _: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
+    PostMessageW(HAUPT.load(Relaxed) as HWND, WM_SICHTBAR, 0, 0);
+}
 
 /// Grundschrift fuer eine Skalierung (DPI x Zoom).
 pub unsafe fn schrift(scale: f32) -> HFONT {
@@ -386,7 +395,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             with_app(|a| a.render());
             0
         }
-        // Immer ganz unten bleiben (ueber dem Desktop, unter allen anderen Fenstern)
+        WM_SICHTBAR => {
+            with_app(|a| a.update_visibility());
+            0
+        }
+        // Immer ganz unten bleiben (ueber dem Desktop, unter allen anderen Fenstern),
+        // ausser Sysglow liegt gerade voruebergehend ueber einem Vollbild-Fenster
+        WM_WINDOWPOSCHANGING if app::OBEN.load(Relaxed) => 0,
         WM_WINDOWPOSCHANGING => {
             let p = &mut *(lp as *mut WINDOWPOS);
             p.hwndInsertAfter = HWND_BOTTOM;
@@ -439,6 +454,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 a.tracking = false;
                 a.mouse_at(None);
             });
+            PostMessageW(hwnd, WM_SICHTBAR, 0, 0);
             0
         }
         WM_LBUTTONUP => {
@@ -644,6 +660,9 @@ fn main() {
         let geprueft = app.settings.update_geprueft;
         app::install(app);
         update::starten(hwnd as usize, geprueft);
+        HAUPT.store(hwnd as usize, Relaxed);
+        SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null_mut(), Some(vordergrund), 0, 0, WINEVENT_OUTOFCONTEXT);
+        SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, null_mut(), Some(vordergrund), 0, 0, WINEVENT_OUTOFCONTEXT);
 
         TRAY_ICON.store(gfx::make_icon(GetSystemMetrics(SM_CXSMICON)) as usize, Relaxed);
         TASKBAR_MSG.store(RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()), Relaxed);

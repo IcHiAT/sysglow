@@ -62,14 +62,9 @@ fn umbrechen(eintrag: &str, max: usize) -> Vec<String> {
     zeilen.into_iter().enumerate().map(|(i, t)| format!("{} {t}", if i == 0 { zeichen } else { ' ' })).collect()
 }
 
-pub const NEUES_FUER: &str = "0.9.1";
+pub const NEUES_FUER: &str = "0.9.2";
 pub const NEUES: &[&str] = &[
-    "+ Autoupdate",
-    "+ Dieses Fenster nach jedem Update",
-    "+ Neue Elemente auch mit alter ini",
-    "+ Menü zeigt, warum CPU-Temp fehlt",
-    "- –°C ohne Wert entfällt",
-    "* Todo fehlte nach Update",
+    "+ Bei Vollbild sichtbar, sobald Start, Taskleiste oder ein anderes Fenster vorne ist",
 ];
 
 #[derive(Clone, Copy, PartialEq)]

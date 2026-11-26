@@ -116,6 +116,10 @@ pub struct App {
     pub dragging: bool,
     visible: bool,
     pub user_hidden: bool,
+    /// zuletzt gesehenes Vollbild-Fenster (fuer "Taskleiste ueber Vollbild")
+    vollbild_fenster: HWND,
+    /// voruebergehend ueber dem Vollbild-Fenster statt ganz unten
+    oben: bool,
     pub scale: f32,
     /// Skalierung des Systems (DPI); `scale` = dpi x zoom
     dpi: f32,
@@ -185,6 +189,74 @@ fn fullscreen_active() -> bool {
     matches!(notification_state(), 2..=4)
 }
 
+/// true: Sysglow liegt gerade ueber einem Vollbild-Fenster (wndproc laesst dann die Z-Reihenfolge in Ruhe)
+pub static OBEN: AtomicBool = AtomicBool::new(false);
+
+fn klasse(h: HWND) -> String {
+    let mut b = [0u16; 64];
+    let n = unsafe { GetClassNameW(h, b.as_mut_ptr(), b.len() as i32) };
+    String::from_utf16_lossy(&b[..n.max(0) as usize])
+}
+
+/// Taskleiste, Startmenue, Suche, Desktop, Infobereich – oder ein eigenes Fenster (Menue, Kalender, Todo)
+fn ist_shell(h: HWND) -> bool {
+    if h.is_null() {
+        return true;
+    }
+    let mut pid = 0;
+    unsafe { GetWindowThreadProcessId(h, &mut pid) };
+    if pid == unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() } {
+        return true;
+    }
+    matches!(
+        klasse(h).as_str(),
+        "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "Progman"
+            | "WorkerW"
+            | "NotifyIconOverflowWindow"
+            | "TopLevelWindowForOverflowXamlIsland"
+            | "XamlExplorerHostIslandWindow"
+            | "Windows.UI.Core.CoreWindow"
+            | "TaskListThumbnailWnd"
+            | "ForegroundStaging"
+            | "MultitaskingViewFrame"
+    )
+}
+
+/// Fenster ist sichtbar, nicht minimiert und bedeckt seinen ganzen Bildschirm
+fn deckt_monitor(h: HWND) -> bool {
+    unsafe {
+        if h.is_null() || IsWindowVisible(h) == 0 || IsIconic(h) != 0 {
+            return false;
+        }
+        let mut r = zeroed::<RECT>();
+        let mon = MonitorFromWindow(h, MONITOR_DEFAULTTONULL);
+        let mut mi = zeroed::<MONITORINFO>();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if mon.is_null() || GetWindowRect(h, &mut r) == 0 || GetMonitorInfoW(mon, &mut mi) == 0 {
+            return false;
+        }
+        let m = mi.rcMonitor;
+        r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
+    }
+}
+
+/// von Windows versteckt (z. B. ruhende Store-Apps, Fenster auf anderen virtuellen Desktops)
+fn verhuellt(h: HWND) -> bool {
+    use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    let mut c = 0u32;
+    unsafe { DwmGetWindowAttribute(h, DWMWA_CLOAKED as u32, &mut c as *mut u32 as *mut _, 4) == 0 && c != 0 }
+}
+
+fn maus_ueber(h: HWND) -> bool {
+    unsafe {
+        let mut p = zeroed::<POINT>();
+        let mut r = zeroed::<RECT>();
+        GetCursorPos(&mut p) != 0 && GetWindowRect(h, &mut r) != 0 && innen(&r, p.x, p.y)
+    }
+}
+
 const WOCHENTAG: [&str; 7] = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
 /// Kalenderwoche nach ISO 8601.
@@ -241,6 +313,8 @@ impl App {
             dragging: false,
             visible: false,
             user_hidden: false,
+            vollbild_fenster: null_mut(),
+            oben: false,
             scale,
             dpi: scale,
             size: (0, 0),
@@ -566,14 +640,95 @@ impl App {
     }
 
     // ------------------------------------------------------------ Ablauf
+    /// (sichtbar, ueber dem Vollbild-Fenster)
+    fn sichtbarkeit(&mut self) -> (bool, bool) {
+        if self.user_hidden {
+            return (false, false);
+        }
+        if self.settings.vollbild_zeigen {
+            return (true, false);
+        }
+        let fg = unsafe { GetForegroundWindow() };
+        let st = notification_state();
+        if !ist_shell(fg) && (deckt_monitor(fg) || st == 3 || st == 4) {
+            // eben angeklickt (Maus noch drauf): erst ausblenden, wenn die Maus weg ist
+            if self.visible && self.oben && maus_ueber(self.hwnd) {
+                return (true, true);
+            }
+            return (false, false);
+        }
+        // Taskleiste, Startmenue oder ein normales Fenster (Browser, Claude ...) ist vorn:
+        // wie auf dem Desktop arbeiten. Liegt dahinter noch ein Vollbild-Programm auf
+        // unserem Bildschirm, ueber dieses legen, sonst ganz unten bleiben.
+        self.vollbild_fenster = self.vollbild_dahinter();
+        (true, !self.vollbild_fenster.is_null())
+    }
+
+    /// Oberstes Vollbild-Fenster auf dem Bildschirm von Sysglow (Z-Reihenfolge von oben), sonst null
+    fn vollbild_dahinter(&self) -> HWND {
+        unsafe {
+            let mon = MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut h = GetTopWindow(null_mut());
+            for _ in 0..2000 {
+                if h.is_null() {
+                    break;
+                }
+                if !ist_shell(h) && !verhuellt(h) && deckt_monitor(h) && MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) == mon {
+                    return h;
+                }
+                h = GetWindow(h, GW_HWNDNEXT);
+            }
+            null_mut()
+        }
+    }
+
+    /// Z-Reihenfolge setzen. Ganz unten, oder ueber dem Vollbild-Fenster:
+    /// - Startmenue/Taskleiste/eigenes Menue vorn: TOPMOST (bei offenem Startmenue wirkt
+    ///   HWND_TOP nicht, getestet 26.11.2026 mit Apex)
+    /// - normales Fenster vorn (Browser, Claude): direkt darunter einsortieren
+    fn z_setzen(&self, oben: bool) {
+        const F: u32 = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+        unsafe {
+            let ist_topmost = GetWindowLongW(self.hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0;
+            if !oben {
+                if ist_topmost {
+                    SetWindowPos(self.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, F);
+                }
+                SetWindowPos(self.hwnd, HWND_BOTTOM, 0, 0, 0, 0, F);
+                return;
+            }
+            let fg = GetForegroundWindow();
+            if ist_shell(fg) {
+                if !ist_topmost {
+                    SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, F);
+                }
+                return;
+            }
+            if ist_topmost {
+                SetWindowPos(self.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, F);
+            }
+            if GetWindow(fg, GW_HWNDNEXT) != self.hwnd && SetWindowPos(self.hwnd, fg, 0, 0, 0, 0, F) == 0 {
+                SetWindowPos(self.hwnd, HWND_TOP, 0, 0, 0, 0, F);
+            }
+        }
+    }
+
     pub fn update_visibility(&mut self) {
-        let vis = !self.user_hidden && (self.settings.vollbild_zeigen || !fullscreen_active());
+        let (vis, oben) = self.sichtbarkeit();
+        let neu_oben = oben != self.oben;
+        self.oben = oben;
+        OBEN.store(oben, Relaxed);
         if vis != self.visible {
             self.visible = vis;
             if vis {
                 self.render();
             }
             unsafe { ShowWindow(self.hwnd, if vis { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
+        }
+        if vis && (neu_oben || oben) {
+            self.z_setzen(oben);
+        } else if !vis && neu_oben {
+            self.z_setzen(false); // TOPMOST nicht mit ins Verstecken nehmen
         }
     }
 
