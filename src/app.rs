@@ -59,7 +59,8 @@ pub enum Hit {
     Disk(usize),
     Net,
     Ping(usize),
-    Power,
+    /// Energie-Zeile: false = links (Plan), true = rechts (auto/manuell)
+    Power(bool),
     /// Todo-Box: Aufgabe (Index) oder Kopf/leere Flaeche
     Todo(Option<usize>),
 }
@@ -107,6 +108,8 @@ pub struct App {
     game_prev: bool,
     pub hover: Option<Hit>,
     hits: Vec<(i32, i32, Hit)>,
+    /// Ab dieser x-Position zaehlt ein Klick in der Energie-Zeile als "rechts"
+    power_x: i32,
     /// Mausposition im Fenster und Flaechen der Graphen aus dem letzten Bild
     cursor: Option<(i32, i32)>,
     graphs: Vec<RECT>,
@@ -135,6 +138,7 @@ struct Frame {
     hits: Vec<(i32, i32, Hit)>,
     graphs: Vec<RECT>,
     todo_rc: Option<RECT>,
+    power_x: i32,
     y: i32,
     w: i32,
     pad: i32,
@@ -305,6 +309,7 @@ impl App {
             game_prev: false,
             hover: None,
             hits: Vec::new(),
+            power_x: i32::MAX,
             cursor: None,
             graphs: Vec::new(),
             tracking: false,
@@ -327,8 +332,9 @@ impl App {
         (v * self.scale).round() as i32
     }
 
-    pub fn hit_at(&self, y: i32) -> Option<Hit> {
-        self.hits.iter().find(|(a, b, _)| y >= *a && y < *b).map(|h| h.2)
+    pub fn hit_at(&self, x: i32, y: i32) -> Option<Hit> {
+        let h = self.hits.iter().find(|(a, b, _)| y >= *a && y < *b).map(|h| h.2)?;
+        Some(if h == Hit::Power(false) { Hit::Power(x >= self.power_x) } else { h })
     }
 
     /// Maus bewegt: neu zeichnen, wenn sich das Element oder der Punkt im Graphen geaendert hat.
@@ -339,7 +345,7 @@ impl App {
         };
         let changed = key(self, pos) != key(self, self.cursor);
         self.cursor = pos;
-        let hit = pos.and_then(|p| self.hit_at(p.1));
+        let hit = pos.and_then(|p| self.hit_at(p.0, p.1));
         if changed || hit != self.hover {
             self.hover = hit;
             self.render();
@@ -551,11 +557,18 @@ impl App {
         self.plan = crate::power::active_plan();
     }
 
-    /// Klick auf die Energie-Zeile: zwischen plan_normal und plan_spiel wechseln.
-    pub fn toggle_plan(&mut self) {
-        let st = &self.settings;
-        let target = if self.plan.as_deref() == Some(st.plan_game.as_str()) { st.plan_normal.clone() } else { st.plan_game.clone() };
-        crate::power::set_plan(&target);
+    /// Klick links auf die Energie-Zeile: naechster (schritt 1) oder vorheriger (-1) Energieplan.
+    pub fn cycle_plan(&mut self, schritt: i32) {
+        let plaene = crate::power::plans();
+        if plaene.is_empty() {
+            return;
+        }
+        let n = plaene.len() as i32;
+        let i = self.plan.as_ref().and_then(|p| plaene.iter().position(|g| g == p)).map_or(0, |i| (i as i32 + schritt).rem_euclid(n));
+        crate::power::set_plan(&plaene[i as usize]);
+        for g in &plaene {
+            self.plan_label(g);
+        }
         self.plan = crate::power::active_plan();
         self.render();
     }
@@ -850,8 +863,9 @@ impl App {
         let plan = self.plan.clone().unwrap_or_default();
         let name = self.plan_names.iter().find(|(g, _)| *g == plan).map_or("?".to_string(), |x| x.1.clone());
         let col = if plan == st.plan_game { st.accent } else { st.dim };
-        let right = match (&self.game, self.hover == Some(Hit::Power)) {
-            (_, true) => "Klick: wechseln".to_string(),
+        let right = match (&self.game, self.hover) {
+            (_, Some(Hit::Power(false))) => "Klick: Plan".to_string(),
+            (_, Some(Hit::Power(true))) => (if st.power_auto { "Klick: manuell" } else { "Klick: auto" }).to_string(),
             (Some(g), _) => g.clone(),
             (None, _) if st.power_auto => "auto".to_string(),
             (None, _) => "manuell".to_string(),
@@ -860,7 +874,9 @@ impl App {
         let rw = self.put(f, &right, f.w - f.pad, true, f.inner, rcol);
         let lw = self.put(f, "PWR", f.pad, false, f.inner, st.fg);
         self.put(f, &name, f.pad + lw + f.gap, false, f.inner - lw - rw - 2 * f.gap, col);
-        f.hits.push((f.y, f.y + f.rh, Hit::Power));
+        // Rechter Klickbereich fest so breit wie "manuell", damit er beim Hover nicht springt
+        f.power_x = f.w - f.pad - self.measure("manuell") - f.gap;
+        f.hits.push((f.y, f.y + f.rh, Hit::Power(false)));
         f.y += f.rh;
     }
 
@@ -1119,7 +1135,7 @@ impl App {
         }
         let w = self.px(self.settings.width);
         let pad = self.px(PAD);
-        let mut f = Frame { ops: Vec::new(), dr: Vec::new(), hits: Vec::new(), graphs: Vec::new(), todo_rc: None, y: self.px(3.0), w, pad, gap: self.px(GAP), rh: self.px(ROW_H), inner: w - 2 * pad };
+        let mut f = Frame { ops: Vec::new(), dr: Vec::new(), hits: Vec::new(), graphs: Vec::new(), todo_rc: None, power_x: i32::MAX, y: self.px(3.0), w, pad, gap: self.px(GAP), rh: self.px(ROW_H), inner: w - 2 * pad };
 
         // Elemente ohne Daten (GPU nicht erkannt) ganz weglassen, auch ohne Trennlinie
         let modules: Vec<&String> = self.settings.modules.iter().filter(|m| *m != "gpu" || self.gpu.is_some()).collect();
@@ -1182,6 +1198,7 @@ impl App {
         self.hits = f.hits;
         self.graphs = f.graphs;
         self.todo_rc = f.todo_rc;
+        self.power_x = f.power_x;
     }
 }
 

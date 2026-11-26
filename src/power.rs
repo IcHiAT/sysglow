@@ -6,10 +6,29 @@ use std::ptr::null_mut;
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
-use windows_sys::Win32::System::Power::{PowerGetActiveScheme, PowerReadFriendlyName, PowerSetActiveScheme};
+use windows_sys::Win32::System::Power::{PowerEnumerate, PowerGetActiveScheme, PowerReadFriendlyName, PowerSetActiveScheme, ACCESS_SCHEME};
 
 pub const PLAN_BALANCED: &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
 pub const PLAN_HIGH: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
+pub const PLAN_SAVER: &str = "a1841308-3541-4fab-bc81-f71556f20b4a";
+
+/// Alle Energieplaene, die Windows anbietet: Ausbalanciert, Hoechstleistung, Energiesparen zuerst, eigene dahinter.
+pub fn plans() -> Vec<String> {
+    let mut v = Vec::new();
+    unsafe {
+        for i in 0..32 {
+            let mut g: GUID = zeroed();
+            let mut len = size_of::<GUID>() as u32;
+            if PowerEnumerate(null_mut(), null_mut(), null_mut(), ACCESS_SCHEME, i, &mut g as *mut GUID as *mut u8, &mut len) != 0 {
+                break;
+            }
+            v.push(guid_str(&g));
+        }
+    }
+    let rang = |g: &String| [PLAN_BALANCED, PLAN_HIGH, PLAN_SAVER].iter().position(|p| p == g).unwrap_or(3);
+    v.sort_by_key(rang);
+    v
+}
 
 /// "381b4222-f694-41f0-9685-ff5bb260df2e" -> GUID
 pub fn parse_guid(s: &str) -> Option<GUID> {

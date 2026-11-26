@@ -472,10 +472,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 } else if a.ignore_up {
                     a.ignore_up = false;
                 } else {
-                    match a.hit_at(mouse_y) {
+                    match a.hit_at(mouse_x, mouse_y) {
                         Some(Hit::Todo(i)) => return a.todo_klick(i, mouse_x),
                         Some(Hit::Ping(i)) => a.toggle_graph(i),
-                        Some(Hit::Power) => a.toggle_plan(),
+                        Some(Hit::Power(false)) => a.cycle_plan(1),
+                        Some(Hit::Power(true)) => a.set_power_auto(!a.settings.power_auto),
                         Some(Hit::Uhr) => {
                             let mut rc = zeroed::<RECT>();
                             GetWindowRect(hwnd, &mut rc);
@@ -503,7 +504,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_LBUTTONDBLCLK => {
             let cmd = with_app(|a| {
-                let c = match a.hit_at(mouse_y)? {
+                let c = match a.hit_at(mouse_x, mouse_y)? {
                     Hit::Uhr => {
                         a.ignore_up = true; // zweiter Klick soll den Kalender nicht gleich wieder schliessen
                         return None;
@@ -523,8 +524,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         a.ignore_up = true;
                         return None;
                     }
-                    Hit::Power => {
-                        a.toggle_plan(); // ersten Klick des Doppelklicks rueckgaengig machen
+                    // ersten Klick des Doppelklicks rueckgaengig machen
+                    Hit::Power(rechts) => {
+                        if rechts {
+                            a.set_power_auto(!a.settings.power_auto);
+                        } else {
+                            a.cycle_plan(-1);
+                        }
                         "control.exe powercfg.cpl".to_string()
                     }
                 };

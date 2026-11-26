@@ -23,7 +23,7 @@ Klick auf das Datum öffnet den Kalender:
   - `ram` – belegt/gesamt, Balken
   - `platten` – alle festen Laufwerke mit Füllstand
   - `netz` – Download/Upload mit Verlaufsgraph
-  - `energie` – aktiver Energieplan und erkanntes Spiel; Klick wechselt den Plan, Doppelklick öffnet die Energieoptionen
+  - `energie` – aktiver Energieplan und erkanntes Spiel; Klick links schaltet reihum durch die Energiepläne, Klick rechts zwischen auto und manuell, Doppelklick öffnet die Energieoptionen
   - `ping` – beliebig viele Hosts (ICMP), Farbe nach Schwellwert, optional Graph; die letzte deutliche Spitze steht als kleine rote Zahl im Graphen
   - `todo` – Todo-Liste aus `todo.txt` neben der ini (eine Aufgabe je Zeile, `x ` vorne = erledigt). Klick aufs Kästchen hakt ab, Klick auf den Text öffnet einen Editor, der mit dem Text wächst; Esc oder Klick daneben speichert. Die Datei darf auch ein anderes Programm oder Claude ändern, Sysglow liest sie dann neu
 - **Energieplan automatisch**: Startet ein Spiel (Prozess aus `spiele` oder Direct3D-Vollbild), schaltet glow auf `plan_spiel` (Höchstleistung); ist das Spiel beendet, zurück auf `plan_normal` (Ausbalanciert). Umgeschaltet wird nur beim Wechsel – wer zwischendurch von Hand umstellt, wird nicht überstimmt. Funktioniert auch, wenn das Element `energie` ausgeblendet ist; abschalten mit `energie_auto = 0` oder im Menü.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.3 (unveröffentlicht)
+
+- Geändert: Die Energie-Zeile hat zwei Klickbereiche. Links (PWR und Planname) schaltet der Klick reihum durch alle Energiepläne, die Windows anbietet: Ausbalanciert → Höchstleistung → Energiesparmodus, eigene Pläne dahinter. Rechts schaltet der Klick zwischen „auto“ und „manuell“ (wie der Menüpunkt *Energieplan bei Spielen umschalten*). Beim Darüberfahren steht rechts „Klick: Plan“ bzw. „Klick: auto“/„Klick: manuell“. Doppelklick öffnet weiter die Energieoptionen.
+
 ## 0.9.2 (26.11.2026)
 
 - Neu: Läuft ein Spiel oder Video im Vollbild und wechselt man zum Desktop (Windows-Taste, Startmenü, Taskleiste) oder zu einem anderen Fenster wie Browser oder Claude, ist Sysglow sichtbar und anklickbar, während das Vollbild im Hintergrund weiterläuft. Zurück im Vollbild ist es wieder weg. Bei offenem Start oder offener Taskleiste liegt Sysglow kurz „immer oben“, vor einem normalen Fenster direkt darunter. Bewegt man die Maus über das Widget, bleibt es sichtbar, auch wenn man währenddessen ins Spiel zurückwechselt.
